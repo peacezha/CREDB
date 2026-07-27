@@ -97,6 +97,15 @@ const run = async () => {
   }
 
   // 3. type / gene / chr — each persisted right after its query
+  // chrDist groups by an expression over millions of rows. When the composite
+  // (species, position(N)) index exists, FORCE it: the position prefix covers
+  // the whole value for typical "chr:start-end" strings, so MySQL can answer
+  // with a covering index scan (no row lookups) — orders of magnitude faster
+  // than scanning the LONGTEXT table on a memory-tight box.
+  const [idxRows] = await pool.query(`SHOW INDEX FROM ${TABLE} WHERE Key_name = 'idx_species_position'`);
+  const chrFrom = idxRows.length > 0 ? `${TABLE} FORCE INDEX (idx_species_position)` : TABLE;
+  console.log(idxRows.length > 0 ? 'chrDist: using covering index idx_species_position' : 'chrDist: no position index, plain scan');
+
   const stats = [
     {
       field: 'type_dist',
@@ -111,7 +120,7 @@ const run = async () => {
     {
       field: 'chr_dist',
       col: 'position',
-      sql: `SELECT SUBSTRING_INDEX(\`position\`, ':', 1) as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`position\` LIKE '%:%' GROUP BY label ORDER BY LENGTH(label), label`,
+      sql: `SELECT SUBSTRING_INDEX(\`position\`, ':', 1) as label, COUNT(*) as count FROM ${chrFrom} WHERE species = ? AND \`position\` LIKE '%:%' GROUP BY label ORDER BY LENGTH(label), label`,
     },
   ];
 
