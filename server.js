@@ -333,23 +333,39 @@ async function initializeDatabase() {
     }
 
     if (missingIndexes.length > 0) {
-      console.log(`   Creating ${missingIndexes.length} missing index(es) in background...`);
-      // Build indexes asynchronously — don't block server startup
-      (async () => {
+      // Auto-creating indexes on a huge table at startup is dangerous: every
+      // restart re-fires (or rolls back) the DDL and stalls the whole service.
+      // Default is OFF — build them manually (see log below) during a quiet
+      // window; set AUTO_CREATE_INDEXES=1 to restore the old behaviour.
+      if (process.env.AUTO_CREATE_INDEXES === '1') {
+        console.log(`   Creating ${missingIndexes.length} missing index(es) in background...`);
+        // Build indexes asynchronously — don't block server startup
+        (async () => {
+          for (const idx of missingIndexes) {
+            const colsSql = idx.cols.map(c => {
+              const m = c.match(/^(.+?)\((\d+)\)$/);
+              return m ? `\`${m[1]}\`(${m[2]})` : `\`${c}\``;
+            }).join(', ');
+            try {
+              console.log(`   ⏳ Creating ${idx.name} on ${idx.cols.join(', ')}... (this may take a while for large tables)`);
+              await promisePool.query(`CREATE INDEX \`${idx.name}\` ON ${ACTIVE_TABLE} (${colsSql})`);
+              console.log(`   ✅ ${idx.name} created.`);
+            } catch (e) {
+              console.log(`   ⚠️ Could not create ${idx.name}: ${e.message}`);
+            }
+          }
+        })();
+      } else {
+        console.log(`   ℹ️ ${missingIndexes.length} index(es) missing: ${missingIndexes.map(i => i.name).join(', ')}`);
+        console.log(`      Auto-creation is disabled. Build manually during a quiet window, e.g.:`);
         for (const idx of missingIndexes) {
           const colsSql = idx.cols.map(c => {
             const m = c.match(/^(.+?)\((\d+)\)$/);
             return m ? `\`${m[1]}\`(${m[2]})` : `\`${c}\``;
           }).join(', ');
-          try {
-            console.log(`   ⏳ Creating ${idx.name} on ${idx.cols.join(', ')}... (this may take a while for large tables)`);
-            await promisePool.query(`CREATE INDEX \`${idx.name}\` ON ${ACTIVE_TABLE} (${colsSql})`);
-            console.log(`   ✅ ${idx.name} created.`);
-          } catch (e) {
-            console.log(`   ⚠️ Could not create ${idx.name}: ${e.message}`);
-          }
+          console.log(`      CREATE INDEX \`${idx.name}\` ON ${ACTIVE_TABLE} (${colsSql});`);
         }
-      })();
+      }
     } else {
       console.log(`   All indexes present.`);
     }
