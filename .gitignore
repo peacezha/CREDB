@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Runtime cache & data
+.api_cache*.json
+data/
+*.bed
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Tooling / local config
+.claude/
+migrated_prompt_history/
+
+# Logs
+*.log
+npm-debug.log*

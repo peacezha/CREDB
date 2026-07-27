@@ -1,0 +1,50 @@
+{
+  "name": "credb",
+  "version": "2.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "CREDB — Cis-Regulatory Elements Database",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "server": "node server.js",
+    "import": "node bulk_import.js",
+    "import-all": "node bulk_import.js --dir",
+    "db:audit": "node scripts/db_audit.js",
+    "db:optimize": "node scripts/db_optimize.js"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7",
+    "dotenv": "^10.0.0",
+    "lucide-react": "^0.263.1",
+    "mysql2": "^3.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.11",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.11"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

@@ -1,0 +1,203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-paper text-neutral-900 font-sans antialiased;
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  /* Typographic hierarchy — serif headings keep the academic identity */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif font-bold;
+    line-height: 1.25;
+    margin: 0 0 0.5em;
+  }
+  h1 { font-size: 2.25rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.625rem; letter-spacing: -0.005em; }
+  h3 { font-size: 1.25rem; }
+  h4 { font-size: 1.1rem; }
+  p { margin: 0 0 1em; }
+  p:last-child { margin-bottom: 0; }
+
+  a {
+    @apply text-navy-600 transition-colors;
+    text-decoration: none;
+  }
+  a:hover {
+    @apply text-navy-800 underline;
+  }
+
+  /* Keyboard focus must always be visible */
+  :focus-visible {
+    outline: 2px solid theme('colors.navy.500');
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: #dbe4f3;
+    color: #1a1a1a;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #f5f4f0; }
+  ::-webkit-scrollbar-thumb { background: #b8b0a0; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #8b7e6a; }
+  /* Firefox */
+  html { scrollbar-width: thin; scrollbar-color: #b8b0a0 #f5f4f0; }
+}
+
+@layer components {
+  /* Journal-style horizontal rule */
+  .hr-journal { border: none; border-top: 1px solid #d4cfc3; margin: 2rem 0; }
+  .hr-journal-thin { border: none; border-top: 0.5px solid #e8e5dd; margin: 1.5rem 0; }
+
+  /* Figure caption */
+  .fig-caption { font-size: 0.8rem; color: #5d5d5d; font-style: italic; margin-top: 0.5rem; }
+  .fig-caption strong { font-style: normal; }
+
+  /* Card hover */
+  .card-hover { transition: border-color 0.2s, box-shadow 0.2s; }
+  .card-hover:hover { border-color: #b8b0a0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04); }
+
+  /* Academic table */
+  .academic-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .academic-table th {
+    font-weight: 700;
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid #2d2720;
+    color: #2d2720;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .academic-table td { padding: 0.5rem 0.75rem; border-bottom: 0.5px solid #e8e5dd; }
+  .academic-table tbody tr:hover { background: #f5f4f0; }
+
+  /* Tabular numerals: Times New Roman has no tnum support, so numeric
+     columns use the monospace stack to actually align. */
+  .tnum {
+    font-family: theme('fontFamily.mono');
+    font-size: 0.92em;
+    letter-spacing: -0.01em;
+  }
+
+  .animate-fade-in { animation: fadeIn 0.4s ease-out; }
+  .animate-fade-in-up { animation: fadeInUp 0.35s ease-out; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* ── Premium upgrade ───────────────────────────────────────────── */
+
+  /* Deep-navy hero backdrop: linear base + faint radial highlight at top right */
+  .hero-gradient {
+    background:
+      radial-gradient(ellipse at 85% 15%, rgba(94, 143, 197, 0.08), transparent 60%),
+      radial-gradient(ellipse at 70% 5%, rgba(255, 255, 255, 0.06), transparent 50%),
+      linear-gradient(135deg, #15273f 0%, #1e3a5f 55%, #264874 100%);
+  }
+
+  /* Elevated card — .card-hover (above) is kept; this one adds lift + soft shadow */
+  .card-elevated {
+    @apply rounded-md border border-journal-200 bg-white;
+    box-shadow: 0 1px 2px rgba(21, 39, 63, 0.04), 0 4px 16px rgba(21, 39, 63, 0.06);
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  .card-elevated:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(21, 39, 63, 0.06), 0 12px 28px rgba(21, 39, 63, 0.10);
+  }
+
+  /* Staggered entrance — pair with inline style={{ '--i': n }} */
+  .stagger-item {
+    animation: fadeInUp 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  /* Frosted-glass navigation bar */
+  .glass-nav {
+    background: rgba(21, 39, 63, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* Large display numerals */
+  .stat-number {
+    @apply font-serif text-navy-900;
+    letter-spacing: -0.02em;
+  }
+
+  /* Buttons — color + interaction feedback only; compose with the
+     existing padding/size utilities when migrating pages. */
+  .btn-primary {
+    @apply rounded bg-navy-800 text-white;
+    transition: all 0.18s ease;
+  }
+  .btn-primary:hover {
+    @apply bg-navy-700 shadow-sm;
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-secondary {
+    @apply rounded border border-journal-300 text-journal-800;
+    transition: all 0.18s ease;
+  }
+  .btn-secondary:hover {
+    @apply bg-journal-50 shadow-sm;
+    transform: translateY(-1px);
+  }
+  .btn-secondary:active {
+    transform: translateY(0);
+  }
+
+  /* Soft breathing for loading placeholders (alternative to the skeleton pulse) */
+  .animate-pulse-soft {
+    animation: pulse-soft 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* Reduced motion: no entrance animation, no hover lifts */
+  @media (prefers-reduced-motion: reduce) {
+    .stagger-item,
+    .animate-fade-in,
+    .animate-fade-in-up,
+    .animate-pulse-soft {
+      animation: none;
+    }
+    .card-elevated,
+    .card-elevated:hover,
+    .btn-primary,
+    .btn-primary:hover,
+    .btn-secondary,
+    .btn-secondary:hover {
+      transform: none;
+      transition: none;
+    }
+  }
+}

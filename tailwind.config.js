@@ -1,0 +1,72 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        paper: '#faf9f6',
+        journal: {
+          50: '#f5f4f0',
+          100: '#e8e5dd',
+          200: '#d4cfc3',
+          300: '#b8b0a0',
+          400: '#9c917d',
+          500: '#8b7e6a',
+          600: '#766a58',
+          700: '#5f5547',
+          800: '#4a4238',
+          900: '#2d2720',
+        },
+        navy: {
+          50: '#eff4fa',
+          100: '#dbe4f3',
+          200: '#bccfe8',
+          300: '#90b2d8',
+          400: '#5e8fc5',
+          500: '#3d72aa',
+          600: '#2d5a8f',
+          700: '#264874',
+          800: '#1e3a5f',
+          900: '#15273f',
+        },
+        burgundy: {
+          50: '#fdf2f4',
+          100: '#fbe4e9',
+          200: '#f7cdd6',
+          300: '#f0a6b6',
+          400: '#e67590',
+          500: '#d64b6d',
+          600: '#bf2f56',
+          700: '#8b1a2b',
+          800: '#741828',
+          900: '#5c1421',
+        },
+      },
+      fontFamily: {
+        serif: ['"Times New Roman"', 'Times', 'Georgia', 'serif'],
+        sans: [
+          'system-ui',
+          '-apple-system',
+          '"Segoe UI"',
+          'Roboto',
+          '"Helvetica Neue"',
+          'Arial',
+          'sans-serif',
+        ],
+        mono: [
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'Consolas',
+          '"Liberation Mono"',
+          'monospace',
+        ],
+      },
+      boxShadow: {
+        soft: '0 1px 2px rgba(21,39,63,.04), 0 4px 16px rgba(21,39,63,.06)',
+        lift: '0 2px 4px rgba(21,39,63,.06), 0 12px 28px rgba(21,39,63,.10)',
+      },
+    },
+  },
+  plugins: [],
+};
