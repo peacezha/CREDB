@@ -8,9 +8,11 @@ import {
   UploadCloud,
   List,
 } from 'lucide-react';
+import PageHeader from '../components/PageHeader';
 
 interface HelpSection {
   id: string;
+  kicker: string;
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   paragraphs: string[];
@@ -19,6 +21,7 @@ interface HelpSection {
 const SECTIONS: HelpSection[] = [
   {
     id: 'searching',
+    kicker: '01 · Searching',
     title: 'Searching the Database',
     icon: Search,
     paragraphs: [
@@ -28,6 +31,7 @@ const SECTIONS: HelpSection[] = [
   },
   {
     id: 'details',
+    kicker: '02 · Details',
     title: 'Viewing Details & Motifs',
     icon: Eye,
     paragraphs: [
@@ -36,6 +40,7 @@ const SECTIONS: HelpSection[] = [
   },
   {
     id: 'external-links',
+    kicker: '03 · Links',
     title: 'External Links',
     icon: ExternalLink,
     paragraphs: [
@@ -44,6 +49,7 @@ const SECTIONS: HelpSection[] = [
   },
   {
     id: 'downloading',
+    kicker: '04 · Download',
     title: 'Downloading Data',
     icon: Download,
     paragraphs: [
@@ -53,6 +59,7 @@ const SECTIONS: HelpSection[] = [
   },
   {
     id: 'analysis',
+    kicker: '05 · Analysis',
     title: 'Online Analysis (ISM)',
     icon: FlaskConical,
     paragraphs: [
@@ -62,6 +69,7 @@ const SECTIONS: HelpSection[] = [
   },
   {
     id: 'submitting',
+    kicker: '06 · Submit',
     title: 'Submitting & Managing Data',
     icon: UploadCloud,
     paragraphs: [
@@ -81,15 +89,17 @@ const Help: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <div>
-        <h1 className="font-serif text-navy-900">User Guide</h1>
-        <p className="mt-2 max-w-3xl text-journal-600">
-          Learn how to navigate and use the Cis-Regulatory Elements Database (CREDB) effectively across all
-          supported species.
-        </p>
-      </div>
+      <PageHeader
+        kicker="06 — Help"
+        title="User Guide"
+        description="Learn how to navigate and use the Cis-Regulatory Elements Database (CREDB) effectively across all supported species."
+      />
 
-      <nav aria-label="Table of contents" className="rounded-md border border-journal-200 bg-white p-6">
+      <nav
+        aria-label="Table of contents"
+        className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-6"
+        style={{ '--i': 0 } as React.CSSProperties}
+      >
         <h2 className="flex items-center gap-2 font-serif text-lg text-navy-900">
           <List className="h-5 w-5 text-navy-600" />
           Contents
@@ -106,21 +116,23 @@ const Help: React.FC = () => {
       </nav>
 
       <div className="space-y-6">
-        {SECTIONS.map((section) => (
+        {SECTIONS.map((section, i) => (
           <section
             key={section.id}
             id={section.id}
-            className="card-hover scroll-mt-6 rounded-md border border-journal-200 bg-white p-6"
+            className="stagger-item card-elevated scroll-mt-6 rounded-md border border-journal-200 bg-white p-6"
+            style={{ '--i': i + 1 } as React.CSSProperties}
           >
-            <div className="mb-3 flex items-center gap-3">
+            <p className="section-kicker">{section.kicker}</p>
+            <div className="mb-3 mt-2 flex items-center gap-3">
               <div className="rounded-md bg-navy-50 p-2 text-navy-700">
                 <section.icon className="h-5 w-5" />
               </div>
-              <h2 className="font-serif text-lg text-navy-900">{section.title}</h2>
+              <h2 className="mb-0 font-serif text-lg text-navy-900">{section.title}</h2>
             </div>
             <div className="space-y-3 pl-0 sm:pl-12">
-              {section.paragraphs.map((p, i) => (
-                <p key={i} className="leading-relaxed text-journal-700">
+              {section.paragraphs.map((p, j) => (
+                <p key={j} className="leading-relaxed text-journal-700">
                   {p}
                 </p>
               ))}

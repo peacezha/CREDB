@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import DataGrid from '../components/DataGrid';
+import PageHeader from '../components/PageHeader';
 import {
   describeError,
   fetchData,
@@ -21,6 +22,9 @@ import {
   isAbortError,
 } from '../services/api';
 import type { ApiResponse, ColumnDefinition, GenomicRecord, PaginationMeta } from '../types';
+
+/** Stagger index → CSS custom property consumed by `.stagger-item` entrance animation. */
+const stagger = (i: number) => ({ '--i': i } as React.CSSProperties);
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -512,14 +516,18 @@ const DataViewer: React.FC = () => {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="mb-0 text-navy-900">Data Browser</h1>
-        <p className="text-sm text-journal-500">
-          Query the cis-regulatory elements database by Peak ID, genomic position, gene name, or
-          functional annotation. Active filters are stored in the URL, so any view can be shared or
-          bookmarked.
-        </p>
-      </div>
+      <PageHeader
+        kicker="01 — Data"
+        title="Data Browser"
+        description="Browse cis-regulatory elements and filter by species, tissue, or chromosome — active filters live in the URL, so any view can be shared or bookmarked."
+        actions={
+          statsText && !error ? (
+            <span className="tnum rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+              {statsText}
+            </span>
+          ) : undefined
+        }
+      />
 
       {speciesError && (
         <ErrorBanner
@@ -530,7 +538,10 @@ const DataViewer: React.FC = () => {
       )}
 
       {/* Filters + search */}
-      <div className="space-y-4 rounded-md border border-journal-200 bg-white p-5">
+      <div
+        className="stagger-item card-elevated space-y-4 rounded-md border border-journal-200 bg-white p-5"
+        style={stagger(0)}
+      >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <FilterSelect
             id="filter-species"
@@ -656,7 +667,7 @@ const DataViewer: React.FC = () => {
             </div>
           )}
         </div>
-        <p className="text-xs text-journal-400">
+        <p className="text-xs text-journal-500">
           Tip: separate multiple terms with a space to narrow the search.
         </p>
       </div>
@@ -669,24 +680,20 @@ const DataViewer: React.FC = () => {
         />
       )}
 
-      <div className="space-y-2">
-        {statsText && !error && (
-          <div className="flex justify-end">
-            <p className="tnum text-xs text-journal-500">{statsText}</p>
-          </div>
-        )}
-        <div className="min-h-[600px] rounded-md border border-journal-200 bg-white">
-          <DataGrid
-            columns={activeColumns}
-            data={data}
-            meta={meta}
-            loading={loading}
-            error={error}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-          />
-        </div>
+      <div
+        className="stagger-item card-elevated min-h-[600px] rounded-md border border-journal-200 bg-white"
+        style={stagger(1)}
+      >
+        <DataGrid
+          columns={activeColumns}
+          data={data}
+          meta={meta}
+          loading={loading}
+          error={error}
+          onPageChange={handlePageChange}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+        />
       </div>
     </div>
   );

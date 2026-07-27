@@ -23,6 +23,10 @@ import {
 import type { PredictPayload } from '../services/api';
 import type { ChromosomeInfo, PredictionResult } from '../types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
+
+/** Stagger index → CSS custom property consumed by `.stagger-item` entrance animation. */
+const stagger = (i: number) => ({ '--i': i } as React.CSSProperties);
 
 type InputMode = 'sequence' | 'region';
 
@@ -233,20 +237,19 @@ const Analysis: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-12 animate-fade-in">
-      <div className="space-y-2">
-        <h1 className="flex items-center gap-3 font-serif text-3xl font-bold text-journal-900">
-          <Activity className="h-8 w-8 text-navy-700" />
-          In-silico Mutagenesis Analysis
-        </h1>
-        <p className="font-serif text-lg text-journal-500">
-          Predict chromatin accessibility and visualize critical motifs using our deep learning model.
-        </p>
-      </div>
+      <PageHeader
+        kicker="02 — Analysis"
+        title="In-silico Mutagenesis Analysis"
+        description="In-silico mutagenesis (ISM) predicts chromatin accessibility for a DNA sequence or genomic region and highlights the nucleotides that drive it."
+      />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         {/* LEFT COLUMN: Input Form */}
         <div className="space-y-6 lg:col-span-1">
-          <div className="rounded-md border border-journal-200 bg-white p-6">
+          <div
+            className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-6"
+            style={stagger(0)}
+          >
             <h3 className="mb-4 flex items-center gap-2 font-serif font-bold text-journal-900">
               <Dna className="h-5 w-5 text-navy-700" />
               Model Configuration
@@ -301,16 +304,20 @@ const Analysis: React.FC = () => {
               {/* Input Mode Toggle */}
               <div>
                 <span className={`${labelClass} mb-2`}>Input Mode</span>
-                <div className="flex gap-2">
+                <div
+                  className="flex rounded-md border border-journal-300 bg-journal-50 p-1"
+                  role="group"
+                  aria-label="Input mode"
+                >
                   <button
                     type="button"
                     onClick={() => setInputMode('sequence')}
                     aria-pressed={inputMode === 'sequence'}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-2 text-sm font-bold transition-colors
                       ${
                         inputMode === 'sequence'
-                          ? 'border-navy-600 bg-navy-50 text-navy-700'
-                          : 'border-journal-200 bg-white text-journal-500 hover:border-journal-300'
+                          ? 'bg-navy-800 text-white shadow-sm'
+                          : 'text-journal-500 hover:text-journal-800'
                       }`}
                   >
                     <FileText className="h-4 w-4" />
@@ -320,11 +327,11 @@ const Analysis: React.FC = () => {
                     type="button"
                     onClick={() => setInputMode('region')}
                     aria-pressed={inputMode === 'region'}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-2 text-sm font-bold transition-colors
                       ${
                         inputMode === 'region'
-                          ? 'border-navy-600 bg-navy-50 text-navy-700'
-                          : 'border-journal-200 bg-white text-journal-500 hover:border-journal-300'
+                          ? 'bg-navy-800 text-white shadow-sm'
+                          : 'text-journal-500 hover:text-journal-800'
                       }`}
                   >
                     <MapPin className="h-4 w-4" />
@@ -489,7 +496,7 @@ const Analysis: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleCancel}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-journal-300 bg-white px-3 py-1.5 text-xs font-medium text-journal-700 transition-colors hover:bg-journal-50"
+                    className="btn-secondary inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium"
                   >
                     <X className="h-3.5 w-3.5" />
                     Cancel
@@ -500,12 +507,7 @@ const Analysis: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading || !species}
-                className={`flex w-full items-center justify-center gap-2 rounded-md py-3 font-serif font-bold text-white transition-colors
-                  ${
-                    loading || !species
-                      ? 'cursor-not-allowed bg-navy-800/50'
-                      : 'bg-navy-800 hover:bg-navy-700'
-                  }`}
+                className="btn-primary flex w-full items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:transform-none"
               >
                 {loading ? (
                   <>
@@ -522,11 +524,14 @@ const Analysis: React.FC = () => {
             </form>
           </div>
 
-          <div className="rounded-md border border-navy-100 bg-navy-50 p-5 text-sm leading-relaxed text-navy-800">
-            <h4 className="mb-2 flex items-center gap-2 font-serif font-bold text-navy-900">
-              <HelpCircle className="h-4 w-4" />
+          <div
+            className="stagger-item card-elevated rounded-md border border-navy-100 bg-navy-50 p-5 text-sm leading-relaxed text-navy-800"
+            style={stagger(1)}
+          >
+            <p className="section-kicker mb-2 flex items-center gap-1.5">
+              <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
               Methodology
-            </h4>
+            </p>
             <p>
               This module uses the fine-tuned BERT-based model for{' '}
               <span className="font-semibold">{speciesLabel}</span> to predict chromatin
@@ -541,7 +546,10 @@ const Analysis: React.FC = () => {
           {result ? (
             <div className="space-y-6 animate-fade-in-up">
               {/* Score Card */}
-              <div className="rounded-md border border-journal-200 bg-white p-6">
+              <div
+                className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-6"
+                style={stagger(0)}
+              >
                 <h3 className="mb-4 flex items-center gap-2 border-b border-journal-100 pb-2 font-serif font-bold text-journal-900">
                   <BarChart3 className="h-5 w-5 text-navy-700" />
                   Prediction Result
@@ -563,8 +571,10 @@ const Analysis: React.FC = () => {
                         {result.classification}
                       </span>
                     </p>
-                    <p className="text-sm text-journal-500">
-                      Threshold: <span className="tnum">{SCORE_THRESHOLD}</span>
+                    <p>
+                      <span className="tnum inline-flex items-center rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                        Threshold {SCORE_THRESHOLD}
+                      </span>
                     </p>
                   </div>
 
@@ -599,7 +609,10 @@ const Analysis: React.FC = () => {
               </div>
 
               {/* Heatmap Card */}
-              <div className="rounded-md border border-journal-200 bg-white p-6">
+              <div
+                className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-6"
+                style={stagger(1)}
+              >
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-serif font-bold text-journal-900">
                     ISM Heatmap Analysis
@@ -608,7 +621,7 @@ const Analysis: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleDownload}
-                      className="flex items-center gap-1.5 rounded-md border border-journal-300 bg-white px-3 py-1.5 text-sm font-medium text-journal-700 transition-colors hover:bg-journal-50"
+                      className="btn-secondary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium"
                       title="Download PNG"
                     >
                       <Download className="h-4 w-4" />
@@ -649,7 +662,10 @@ const Analysis: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-md border-2 border-dashed border-journal-200 bg-journal-50/50 px-6 text-center">
+            <div
+              className="stagger-item flex h-full min-h-[400px] flex-col items-center justify-center rounded-md border-2 border-dashed border-journal-200 bg-journal-50/50 px-6 text-center"
+              style={stagger(0)}
+            >
               <Activity className="mb-4 h-14 w-14 text-journal-300" />
               <p className="font-serif text-lg font-medium text-journal-600">
                 No prediction yet
@@ -689,7 +705,7 @@ const Analysis: React.FC = () => {
               <button
                 type="button"
                 onClick={handleDownload}
-                className="inline-flex items-center gap-1.5 rounded-md bg-navy-800 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-navy-700"
+                className="btn-primary inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium"
               >
                 <Download className="h-4 w-4" />
                 Download High-Res PNG

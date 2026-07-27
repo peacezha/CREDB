@@ -14,6 +14,7 @@ import {
   Loader2,
   AlertTriangle,
 } from 'lucide-react';
+import PageHeader from '../components/PageHeader';
 import { uploadData, fetchStats, deleteSpecies, describeError, isAbortError, MAX_UPLOAD_BYTES } from '../services/api';
 import type { SpeciesBreakdown } from '../types';
 
@@ -184,12 +185,21 @@ const Submit: React.FC = () => {
   const displayHeaders = ['Peak_ID', 'Position', 'tissue', '...'];
   const displayRow = ['Peak_1', 'chr1:100...', 'Leaf', '...'];
 
+  const uploadDisabled = !file || uploading || !trimmedSpecies;
+
   return (
     <div className="space-y-12 pb-12 animate-fade-in">
+      <PageHeader
+        kicker="05 — Submit"
+        title="Submit & Manage Data"
+        description="Upload TSV/CSV files to append new records to CREDB, and manage the datasets already stored in the database."
+      />
+
       {/* SECTION 1: UPLOAD */}
       <div className="space-y-8">
         <div>
-          <h1 className="font-serif text-navy-900">Upload New Data</h1>
+          <p className="section-kicker">Upload</p>
+          <h2 className="mb-0 mt-1 text-navy-900">Upload New Data</h2>
           <p className="mt-2 max-w-3xl text-journal-600">
             Add new genomic peak data. The system supports <strong>flexible formats</strong> (TSV, CSV) and will{' '}
             <strong>automatically detect columns</strong>.
@@ -199,11 +209,14 @@ const Submit: React.FC = () => {
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           {/* Left column: format notes & template */}
           <div className="space-y-6 lg:col-span-1">
-            <div className="rounded-md border border-journal-200 bg-white p-6">
-              <h2 className="flex items-center gap-2 font-serif text-lg text-navy-900">
+            <div
+              className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-6"
+              style={{ '--i': 0 } as React.CSSProperties}
+            >
+              <h3 className="flex items-center gap-2 font-serif text-lg text-navy-900">
                 <Table className="h-5 w-5 text-navy-600" />
                 Flexible Format
-              </h2>
+              </h3>
               <p className="mb-4 text-sm text-journal-600">
                 You can upload <strong>.tsv, .csv, or .txt</strong> files up to{' '}
                 <strong>{MAX_UPLOAD_MB} MB</strong>. The first row will be used as headers.
@@ -230,7 +243,7 @@ const Submit: React.FC = () => {
 
               <button
                 onClick={handleDownloadTemplate}
-                className="flex w-full items-center justify-center gap-2 rounded-md border border-navy-200 bg-navy-50 px-4 py-2 text-sm font-medium text-navy-700 transition-colors hover:bg-navy-100"
+                className="btn-secondary inline-flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-bold"
               >
                 <Download className="h-4 w-4" />
                 Download Example Template
@@ -245,7 +258,10 @@ const Submit: React.FC = () => {
 
           {/* Right column: upload form */}
           <div className="lg:col-span-2">
-            <div className="h-full rounded-md border border-journal-200 bg-white">
+            <div
+              className="stagger-item card-elevated h-full rounded-md border border-journal-200 bg-white"
+              style={{ '--i': 1 } as React.CSSProperties}
+            >
               <div className="flex h-full flex-col justify-center p-8">
                 <form onSubmit={handleSubmit} className="space-y-6" noValidate>
                   <div>
@@ -315,7 +331,14 @@ const Submit: React.FC = () => {
                       ) : (
                         <>
                           <p className="text-lg font-medium text-journal-700">Click to select data file</p>
-                          <p className="mt-1 text-sm text-journal-500">TSV, CSV or TXT — up to {MAX_UPLOAD_MB} MB</p>
+                          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                            <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                              TSV / CSV / TXT
+                            </span>
+                            <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                              Max <span className="tnum">{MAX_UPLOAD_MB}</span> MB
+                            </span>
+                          </div>
                         </>
                       )}
                     </div>
@@ -344,11 +367,11 @@ const Submit: React.FC = () => {
                   <div className="pt-2">
                     <button
                       type="submit"
-                      disabled={!file || uploading || !trimmedSpecies}
-                      className={`flex w-full items-center justify-center gap-2 rounded-md py-3.5 font-serif text-lg font-bold transition-colors ${
-                        !file || uploading || !trimmedSpecies
+                      disabled={uploadDisabled}
+                      className={`inline-flex w-full items-center justify-center gap-2 rounded-md px-5 py-3 text-base font-bold ${
+                        uploadDisabled
                           ? 'cursor-not-allowed bg-journal-200 text-journal-500'
-                          : 'bg-navy-800 text-white hover:bg-navy-700'
+                          : 'btn-primary'
                       }`}
                     >
                       {uploading ? (
@@ -373,7 +396,8 @@ const Submit: React.FC = () => {
       {/* SECTION 2: MANAGE DATASETS */}
       <div className="space-y-6">
         <div>
-          <h2 className="flex items-center gap-2 font-serif text-navy-900">
+          <p className="section-kicker">Manage</p>
+          <h2 className="mt-1 flex items-center gap-2 font-serif text-navy-900">
             <Database className="h-6 w-6 text-navy-600" />
             Manage Existing Datasets
           </h2>
@@ -401,7 +425,10 @@ const Submit: React.FC = () => {
           </div>
         )}
 
-        <div className="rounded-md border border-journal-200 bg-white">
+        <div
+          className="stagger-item card-elevated rounded-md border border-journal-200 bg-white"
+          style={{ '--i': 2 } as React.CSSProperties}
+        >
           {loadingDatasets ? (
             <div className="flex items-center justify-center gap-2 p-8 text-journal-500" role="status">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -415,7 +442,7 @@ const Submit: React.FC = () => {
               </p>
               <button
                 onClick={() => loadDatasets()}
-                className="rounded-md bg-navy-800 px-4 py-2 text-sm font-medium text-white hover:bg-navy-700"
+                className="btn-primary inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-bold"
               >
                 Retry
               </button>
@@ -457,7 +484,7 @@ const Submit: React.FC = () => {
                                   setConfirmInput('');
                                 }}
                                 disabled={isDeleting}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-journal-200 bg-white px-3 py-1.5 text-sm font-medium text-journal-600 transition-colors hover:bg-journal-50 disabled:opacity-50"
+                                className="btn-secondary inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-bold disabled:opacity-50"
                               >
                                 Cancel
                               </button>
