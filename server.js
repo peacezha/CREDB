@@ -308,6 +308,9 @@ async function initializeDatabase() {
     // (255) indexes are kept as-is since they are skipped by name.
     const PERF_INDEXES = [
       { name: 'idx_species', cols: ['species'] },
+      // (species, id) covers `WHERE species = ? ORDER BY id LIMIT n OFFSET m`
+      // entirely in-index — fast deterministic deep paging per species.
+      { name: 'idx_species_id', cols: ['species', 'id'] },
       { name: 'idx_tissue', cols: ['tissue(100)'] },
       { name: 'idx_position', cols: ['position(100)'] },
       { name: 'idx_peak_id', cols: ['peak_id(100)'] },
@@ -1258,6 +1261,18 @@ const server = http.createServer(async (req, res) => {
         if (ftQuery) {
           orParts.push('(MATCH(`peak_id`) AGAINST (? IN BOOLEAN MODE) OR MATCH(`nearest_gene`) AGAINST (? IN BOOLEAN MODE))');
           params.push(ftQuery, ftQuery);
+        } else if (/^[A-Za-z0-9_.:\-]+$/.test(searchTerm)) {
+          // ID-style query (peak_id / gene id / positional string, single term):
+          // prefix LIKE turns into an index range scan (idx_peak_id,
+          // idx_species_gene, idx_position) — milliseconds instead of a
+          // leading-wildcard full-table scan.
+          const p = `${searchTerm}%`;
+          const PREFIX_COLS = ['peak_id', 'nearest_gene', 'position'];
+          const prefixCols = PREFIX_COLS.filter(f => dbFields.includes(f));
+          if (prefixCols.length > 0) {
+              orParts.push(`(${prefixCols.map(col => `\`${col}\` LIKE ?`).join(' OR ')})`);
+              prefixCols.forEach(() => params.push(p));
+          }
         } else {
           const p = `%${searchTerm}%`;
           const SEARCH_COLS = ['peak_id', 'nearest_gene', 'position', 'tissue'];
@@ -1329,8 +1344,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       const t1 = Date.now();
-      // Use query() not execute() — LIMIT/OFFSET as direct values (safe, they're integers)
-      const finalQuery = query + ` LIMIT ${limitNum} OFFSET ${offset}`;
+      // Use query() not execute() — LIMIT/OFFSET as direct values (safe, they're integers).
+      // ORDER BY primary key: deterministic pagination (no row jumping/duplicates
+      // between pages); with idx_species / idx_species_id the sort is free.
+      const finalQuery = query + ` ORDER BY \`id\` LIMIT ${limitNum} OFFSET ${offset}`;
       const [rows] = await promisePool.query(finalQuery, params);
       console.log(`   SELECT took ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
 
