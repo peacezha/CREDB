@@ -16,8 +16,19 @@ require('dotenv').config();
 const mysql = require('mysql2');
 
 const species = process.argv[2];
+// Optional step filter: node scripts/refresh_species.js "Triticum aestivum" chr
+// Valid steps: count, context, type, gene, chr. Default: all.
+const VALID_STEPS = ['count', 'context', 'type', 'gene', 'chr'];
+const stepArgs = process.argv.slice(3).map((s) => s.toLowerCase());
+const onlySteps = stepArgs.length > 0 ? new Set(stepArgs.filter((s) => VALID_STEPS.includes(s))) : null;
+if (stepArgs.length > 0 && (!onlySteps || onlySteps.size === 0)) {
+  console.error(`Unknown step(s): ${stepArgs.join(', ')}. Valid: ${VALID_STEPS.join(', ')}`);
+  process.exit(1);
+}
+const shouldRun = (step) => !onlySteps || onlySteps.has(step);
+
 if (!species) {
-  console.error('Usage: node scripts/refresh_species.js "<species name>"');
+  console.error('Usage: node scripts/refresh_species.js "<species name>" [count] [context] [type] [gene] [chr]');
   process.exit(1);
 }
 
@@ -65,27 +76,29 @@ const run = async () => {
   };
 
   // 1. total + tissue
-  const [[countRows], [tissueRows]] = await timed('COUNT + tissue', () =>
-    Promise.all([
-      pool.query(`SELECT COUNT(*) as total FROM ${TABLE} WHERE species = ?`, [species]),
-      pool.query(
-        `SELECT \`tissue\` as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`tissue\` IS NOT NULL GROUP BY \`tissue\` ORDER BY count DESC`,
-        [species]
-      ),
-    ])
-  );
-  const total = countRows[0].total;
-  const tissueDist = tissueRows.map((r) => ({ label: r.label || 'Unknown', count: r.count }));
-  console.log(`   ${total.toLocaleString()} peaks, ${tissueDist.length} tissues`);
-  await pool.query(
-    `INSERT INTO species_stats (species, total_peaks, tissue_dist, context_dist, updated_at)
-     VALUES (?, ?, ?, '[]', ?)
-     ON DUPLICATE KEY UPDATE total_peaks = VALUES(total_peaks), tissue_dist = VALUES(tissue_dist), updated_at = VALUES(updated_at)`,
-    [species, total, JSON.stringify(tissueDist), Date.now()]
-  );
+  if (shouldRun('count')) {
+    const [[countRows], [tissueRows]] = await timed('COUNT + tissue', () =>
+      Promise.all([
+        pool.query(`SELECT COUNT(*) as total FROM ${TABLE} WHERE species = ?`, [species]),
+        pool.query(
+          `SELECT \`tissue\` as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`tissue\` IS NOT NULL GROUP BY \`tissue\` ORDER BY count DESC`,
+          [species]
+        ),
+      ])
+    );
+    const total = countRows[0].total;
+    const tissueDist = tissueRows.map((r) => ({ label: r.label || 'Unknown', count: r.count }));
+    console.log(`   ${total.toLocaleString()} peaks, ${tissueDist.length} tissues`);
+    await pool.query(
+      `INSERT INTO species_stats (species, total_peaks, tissue_dist, context_dist, updated_at)
+       VALUES (?, ?, ?, '[]', ?)
+       ON DUPLICATE KEY UPDATE total_peaks = VALUES(total_peaks), tissue_dist = VALUES(tissue_dist), updated_at = VALUES(updated_at)`,
+      [species, total, JSON.stringify(tissueDist), Date.now()]
+    );
+  }
 
   // 2. genomic context (slow)
-  if (colNames.includes('genomic_context')) {
+  if (shouldRun('context') && colNames.includes('genomic_context')) {
     const [rows] = await timed('context GROUP BY (slow)', () =>
       pool.query(
         `SELECT \`genomic_context\` as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`genomic_context\` IS NOT NULL GROUP BY \`genomic_context\` ORDER BY count DESC`,
@@ -108,16 +121,19 @@ const run = async () => {
 
   const stats = [
     {
+      step: 'type',
       field: 'type_dist',
       col: 'type',
       sql: `SELECT \`type\` as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`type\` IS NOT NULL AND \`type\` != '' GROUP BY \`type\` ORDER BY count DESC LIMIT 15`,
     },
     {
+      step: 'gene',
       field: 'gene_dist',
       col: 'nearest_gene',
       sql: `SELECT \`nearest_gene\` as label, COUNT(*) as count FROM ${TABLE} WHERE species = ? AND \`nearest_gene\` IS NOT NULL AND \`nearest_gene\` != '' GROUP BY \`nearest_gene\` ORDER BY count DESC LIMIT 15`,
     },
     {
+      step: 'chr',
       field: 'chr_dist',
       col: 'position',
       sql: `SELECT SUBSTRING_INDEX(\`position\`, ':', 1) as label, COUNT(*) as count FROM ${chrFrom} WHERE species = ? AND \`position\` LIKE '%:%' GROUP BY label ORDER BY LENGTH(label), label`,
@@ -125,7 +141,7 @@ const run = async () => {
   ];
 
   for (const s of stats) {
-    if (!colNames.includes(s.col)) continue;
+    if (!shouldRun(s.step) || !colNames.includes(s.col)) continue;
     const [rows] = await timed(`${s.field}`, () => pool.query(s.sql, [species]));
     await persist(s.field, JSON.stringify(rows.map((r) => ({ label: r.label, count: r.count }))));
     console.log(`   ${rows.length} rows`);
