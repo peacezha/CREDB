@@ -47,6 +47,7 @@ export const baseChartOptions = <T extends ChartType>(): ChartOptions<T> =>
         boxHeight: 12,
         padding: 12,
         usePointStyle: true,
+        pointStyle: 'circle',
       },
     },
     tooltip: {

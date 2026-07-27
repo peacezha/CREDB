@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Chart, registerables } from 'chart.js';
-import type { LegendItem, Plugin } from 'chart.js';
+import type { BarElement, LegendItem, Plugin } from 'chart.js';
 import {
   Activity,
   AlertTriangle,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { DashboardData, SpeciesOverview } from '../types';
 import { describeError, fetchDashboardData, fetchOverview, isAbortError } from '../services/api';
+import SpeciesAvatar from '../components/SpeciesAvatar';
 import {
   CHART_COLORS,
   CHART_FONT_FAMILY,
@@ -72,39 +73,117 @@ const useCountUp = (target: number, durationMs = 1200): number => {
 };
 
 // ============================================================
-//  SPECIES ICON — auto-derived: "Triticum aestivum" → /icon/Triticum_aestivum.png
-//  Put .png files in public/icon/ named after the species (spaces → _)
-//  For exceptions (different filenames), add to OVERRIDES below.
+//  Decorative DNA double helix for the hero backdrop — two sine
+//  strands (x woven between 40 and 160) plus horizontal rungs.
 // ============================================================
-const OVERRIDES: Record<string, string> = {
-  // 'Species name': 'actual_filename.png'
-};
-
-const getIconSrc = (species: string) => {
-  if (OVERRIDES[species]) return `/icon/${OVERRIDES[species]}`;
-  return `/icon/${species.replace(/ /g, '_')}.png`;
-};
-
-const SpeciesIcon: React.FC<{ species: string; size: number }> = ({ species, size }) => {
-  // Mark the icon as failed once so a missing file is never re-requested.
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return (
-      <span role="img" aria-label={species} style={{ fontSize: size * 0.5, lineHeight: 1 }}>
-        🌿
-      </span>
-    );
+const helixStrand = (startControl: number): string => {
+  let d = 'M100 -100 ';
+  let c = startControl;
+  for (let y = -100; y < 700; y += 100) {
+    d += `C${c} ${y + 25} ${c} ${y + 75} 100 ${y + 100} `;
+    c = c === 160 ? 40 : 160;
   }
-  return (
-    <img
-      src={getIconSrc(species)}
-      alt={species}
-      loading="lazy"
-      style={{ width: size * 0.7, height: size * 0.7, objectFit: 'contain' }}
-      onError={() => setFailed(true)}
-    />
-  );
+  return d;
 };
+const HELIX_STRAND_A = helixStrand(160);
+const HELIX_STRAND_B = helixStrand(40);
+const HELIX_RUNGS = [-50, 50, 150, 250, 350, 450, 550, 650];
+
+// ============================================================
+//  Inline chart plugins — they live and die with the Chart
+//  instance, so the usual chart.destroy() cleanup is untouched.
+// ============================================================
+
+/** Rounded-rect path helper (capsule radius clamped to the box). */
+const roundedRectPath = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void => {
+  const rr = Math.max(0, Math.min(r, h / 2, w / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+};
+
+/** Faint journal-100 capsule track drawn behind every horizontal bar. */
+const capsuleTrack: Plugin<'bar'> = {
+  id: 'capsuleTrack',
+  beforeDatasetsDraw: chart => {
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    const meta = chart.getDatasetMeta(0);
+    ctx.save();
+    ctx.fillStyle = 'rgba(232, 229, 221, 0.45)'; // journal-100 wash
+    for (const el of meta.data) {
+      const { y, height } = (el as BarElement).getProps(['y', 'height'], true);
+      if (y == null) continue;
+      const h = Math.max(height, 4);
+      roundedRectPath(ctx, chartArea.left, y - h / 2, chartArea.right - chartArea.left, h, h / 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  },
+};
+
+/** Serif value labels drawn at the end of each horizontal bar. */
+const barEndLabels = (format: (v: number) => string): Plugin<'bar'> => ({
+  id: 'barEndLabels',
+  afterDatasetsDraw: chart => {
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    const meta = chart.getDatasetMeta(0);
+    const data = chart.data.datasets[0].data as number[];
+    ctx.save();
+    ctx.font = `10px ${CHART_SERIF_FAMILY}`;
+    ctx.fillStyle = '#5f5547'; // journal-700
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < meta.data.length; i++) {
+      const { x, y } = (meta.data[i] as BarElement).getProps(['x', 'y'], true);
+      if (x == null || y == null) continue;
+      const label = format(Number(data[i]));
+      // Keep the label inside the plot area even for the longest bar.
+      const lx = Math.min(x + 6, chartArea.right - ctx.measureText(label).width - 2);
+      ctx.fillText(label, lx, y);
+    }
+    ctx.restore();
+  },
+});
+
+/** Dashed horizontal average reference line for the chromosome area chart. */
+const avgLine = (values: number[]): Plugin<'line'> => ({
+  id: 'avgLine',
+  afterDraw: chart => {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea || values.length === 0) return;
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const y = scales.y.getPixelForValue(avg);
+    if (y < chartArea.top || y > chartArea.bottom) return;
+    ctx.save();
+    ctx.strokeStyle = '#b8b0a0'; // journal-300
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, y);
+    ctx.lineTo(chartArea.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = `10px ${CHART_FONT_FAMILY}`;
+    ctx.fillStyle = '#9c917d'; // journal-400
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('avg', chartArea.right - 2, y - 3);
+    ctx.restore();
+  },
+});
 
 const ErrorBanner: React.FC<{ title: string; message: string; onRetry: () => void }> = ({
   title,
@@ -221,6 +300,7 @@ const Home: React.FC = () => {
     const dist = dashboardData?.distribution;
     if (!canvas || !dist || dist.length === 0) return;
     const totalPeaks = dashboardData?.stats.totalPeaks ?? 0;
+    const speciesName = dashboard?.species ?? selectedSpecies;
     const colors = dist.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]);
     const base = baseChartOptions<'doughnut'>();
     const centerText: Plugin<'doughnut'> = {
@@ -234,10 +314,10 @@ const Home: React.FC = () => {
         ctx.textBaseline = 'middle';
         ctx.font = `700 22px ${CHART_SERIF_FAMILY}`;
         ctx.fillStyle = '#15273f'; // navy-900
-        ctx.fillText(totalPeaks.toLocaleString(), x, y - 9);
-        ctx.font = `11px ${CHART_FONT_FAMILY}`;
+        ctx.fillText(totalPeaks.toLocaleString(), x, y - 10);
+        ctx.font = `italic 11px ${CHART_SERIF_FAMILY}`;
         ctx.fillStyle = '#8b7e6a'; // journal-500
-        ctx.fillText('total peaks', x, y + 13);
+        ctx.fillText(speciesName, x, y + 12);
         ctx.restore();
       },
     };
@@ -251,6 +331,8 @@ const Home: React.FC = () => {
             backgroundColor: colors,
             borderColor: '#ffffff',
             borderWidth: 2,
+            borderRadius: 4,
+            spacing: 2,
             hoverOffset: 8,
           },
         ],
@@ -274,6 +356,7 @@ const Home: React.FC = () => {
                   fillStyle: fills[i] ?? CHART_COLORS[0],
                   strokeStyle: fills[i] ?? CHART_COLORS[0],
                   lineWidth: 0,
+                  pointStyle: 'circle',
                   hidden: !c.getDataVisibility(i),
                   index: i,
                 }));
@@ -329,7 +412,7 @@ const Home: React.FC = () => {
                 'horizontal'
               );
             },
-            borderRadius: 6,
+            borderRadius: 999,
             borderSkipped: false,
             maxBarThickness: 22,
           },
@@ -348,6 +431,8 @@ const Home: React.FC = () => {
         },
         scales: {
           x: {
+            // Headroom so the serif end labels never clip.
+            suggestedMax: sorted[sorted.length - 1].count * 1.15,
             grid: { color: CHART_GRID_COLOR },
             border: { display: false },
             ticks: {
@@ -363,6 +448,7 @@ const Home: React.FC = () => {
           },
         },
       },
+      plugins: [capsuleTrack, barEndLabels(formatCompact)],
     });
     return () => {
       chart.destroy();
@@ -383,10 +469,10 @@ const Home: React.FC = () => {
           {
             data: typeDist.map(t => t.count),
             backgroundColor: typeDist.map((_, i) =>
-              hexToRgba(CHART_COLORS[i % CHART_COLORS.length], 0.7)
+              hexToRgba(CHART_COLORS[i % CHART_COLORS.length], 0.75)
             ),
             borderColor: '#ffffff',
-            borderWidth: 1,
+            borderWidth: 2,
           },
         ],
       },
@@ -402,7 +488,8 @@ const Home: React.FC = () => {
         },
         scales: {
           r: {
-            grid: { color: CHART_GRID_COLOR },
+            grid: { color: CHART_GRID_COLOR, circular: true },
+            angleLines: { color: CHART_GRID_COLOR },
             ticks: { display: false },
           },
         },
@@ -438,7 +525,7 @@ const Home: React.FC = () => {
                 'horizontal'
               );
             },
-            borderRadius: 6,
+            borderRadius: 999,
             borderSkipped: false,
             maxBarThickness: 16,
           },
@@ -457,6 +544,7 @@ const Home: React.FC = () => {
         },
         scales: {
           x: {
+            suggestedMax: sorted[sorted.length - 1].count * 1.15,
             grid: { color: CHART_GRID_COLOR },
             border: { display: false },
             ticks: {
@@ -475,6 +563,7 @@ const Home: React.FC = () => {
           },
         },
       },
+      plugins: [capsuleTrack, barEndLabels(formatCompact)],
     });
     return () => {
       chart.destroy();
@@ -487,33 +576,39 @@ const Home: React.FC = () => {
     const chrDist = dashboardData?.chrDist;
     if (!canvas || !chrDist || chrDist.length === 0) return;
     const base = baseChartOptions<'line'>();
+    const counts = chrDist.map(c => c.count);
     const chart = new Chart(canvas, {
       type: 'line',
       data: {
         labels: chrDist.map(c => c.label),
         datasets: [
           {
-            data: chrDist.map(c => c.count),
-            borderColor: '#2d5a8f', // navy-600
+            data: counts,
+            borderColor: context => {
+              const { ctx, chartArea } = context.chart;
+              if (!chartArea) return '#2d5a8f';
+              return makeGradient(ctx, chartArea, '#90b2d8', '#2d5a8f', 'horizontal');
+            },
             borderWidth: 2,
             fill: true,
             backgroundColor: context => {
               const { ctx, chartArea } = context.chart;
-              if (!chartArea) return 'rgba(61, 114, 170, 0.15)';
+              if (!chartArea) return 'rgba(61, 114, 170, 0.12)';
               return makeGradient(
                 ctx,
                 chartArea,
-                'rgba(61, 114, 170, 0.28)',
-                'rgba(61, 114, 170, 0.02)',
+                'rgba(61, 114, 170, 0.22)',
+                'rgba(61, 114, 170, 0.03)',
                 'vertical'
               );
             },
             tension: 0.35,
+            pointStyle: 'rectRot',
             pointRadius: 3,
             pointHoverRadius: 6,
             pointBackgroundColor: '#2d5a8f',
             pointBorderColor: '#ffffff',
-            pointBorderWidth: 1.5,
+            pointBorderWidth: 2,
           },
         ],
       },
@@ -544,6 +639,7 @@ const Home: React.FC = () => {
           },
         },
       },
+      plugins: [avgLine(counts)],
     });
     return () => {
       chart.destroy();
@@ -579,11 +675,34 @@ const Home: React.FC = () => {
     <div className="space-y-8">
       {/* Hero */}
       <section
-        className="stagger-item hero-gradient rounded-lg px-8 py-12 text-white"
+        className="stagger-item hero-gradient relative overflow-hidden rounded-lg px-8 py-12 text-white"
         style={stagger(0)}
       >
-        <div className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
+        {/* Decorative DNA double helix, right edge */}
+        <svg
+          className="pointer-events-none absolute right-0 top-0 hidden h-full lg:block"
+          width="260"
+          viewBox="0 0 200 600"
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden="true"
+        >
+          <g fill="none" stroke="#ffffff" strokeOpacity="0.09" strokeWidth="2">
+            <path d={HELIX_STRAND_A} />
+            <path d={HELIX_STRAND_B} />
+          </g>
+          <g stroke="#ffffff" strokeOpacity="0.06" strokeWidth="1.5">
+            {HELIX_RUNGS.map(y => (
+              <line key={y} x1="55" y1={y} x2="145" y2={y} />
+            ))}
+          </g>
+        </svg>
+
+        <div className="relative flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
           <div className="max-w-2xl">
+            <p className="mb-4 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-navy-200">
+              <span className="inline-block h-px w-10 bg-white/40" aria-hidden="true" />
+              HZAU · Functional Genomics Laboratory
+            </p>
             <h1 className="mb-2 text-5xl text-white sm:text-6xl">CREDB</h1>
             <p className="font-serif text-xl italic text-navy-100">
               Cis-Regulatory Elements Database
@@ -622,20 +741,24 @@ const Home: React.FC = () => {
             </div>
           </div>
 
-          {/* Live aggregate stats with count-up animation */}
-          <div className="flex shrink-0 flex-wrap gap-8 border-t border-white/20 pt-6 lg:flex-col lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
-            {[
-              { label: 'Total Peaks', value: heroPeaks },
-              { label: 'Species', value: heroSpecies },
-              { label: 'Tissue Types', value: heroTissues },
-            ].map(s => (
-              <div key={s.label}>
-                <p className="stat-number text-white">{s.value.toLocaleString()}</p>
-                <p className="mt-1 text-xs font-bold uppercase tracking-widest text-navy-200">
-                  {s.label}
-                </p>
-              </div>
-            ))}
+          {/* Frosted-glass live stats with count-up animation */}
+          <div className="w-full shrink-0 rounded-lg border border-white/20 bg-white/10 p-6 backdrop-blur-md lg:w-64">
+            <div className="flex flex-col divide-y divide-white/15">
+              {[
+                { label: 'Total Peaks', value: heroPeaks },
+                { label: 'Species', value: heroSpecies },
+                { label: 'Tissue Types', value: heroTissues },
+              ].map(s => (
+                <div key={s.label} className="py-3 first:pt-0 last:pb-0">
+                  <p className="stat-number text-3xl text-white sm:text-4xl">
+                    {s.value.toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-navy-200">
+                    {s.label}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -673,12 +796,15 @@ const Home: React.FC = () => {
             className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5 sm:p-6"
             style={stagger(1)}
           >
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <h2 className="mb-0 flex items-center gap-2 text-journal-900">
-                <Sprout className="h-5 w-5" aria-hidden="true" />
-                Species Atlas
-                <span className="text-sm font-normal text-journal-400">({speciesList.length} species)</span>
-              </h2>
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-journal-200 pb-4">
+              <div>
+                <p className="section-kicker">01 — Explore</p>
+                <h2 className="mb-0 mt-1 flex items-center gap-2 text-journal-900">
+                  <Sprout className="h-5 w-5" aria-hidden="true" />
+                  Species Atlas
+                  <span className="text-sm font-normal text-journal-400">({speciesList.length} species)</span>
+                </h2>
+              </div>
               <div className="relative">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-journal-400"
@@ -727,14 +853,14 @@ const Home: React.FC = () => {
                     style={stagger(i + 2)}
                   >
                     <span
-                      className={`flex items-center justify-center rounded-full border-2 transition-all duration-300 ${
+                      className={`flex items-center justify-center rounded-full transition-all duration-300 ${
                         isSelected
-                          ? 'scale-105 border-navy-700 bg-navy-100 shadow-lg'
-                          : 'border-journal-200 bg-white group-hover:-translate-y-1 group-hover:scale-105 group-hover:border-navy-300 group-hover:shadow-md'
+                          ? 'scale-105 border-2 border-transparent bg-navy-50 shadow-lg ring-2 ring-navy-600 ring-offset-2 ring-offset-white'
+                          : 'border-2 border-journal-200 bg-white group-hover:-translate-y-1 group-hover:scale-105 group-hover:border-navy-300 group-hover:shadow-md'
                       }`}
                       style={{ width: size, height: size }}
                     >
-                      <SpeciesIcon species={o.species} size={size * 0.75} />
+                      <SpeciesAvatar species={o.species} size={size * 0.88} />
                     </span>
                     <span
                       className={`mt-2 max-w-[90px] text-center font-serif text-xs font-bold leading-tight transition-colors ${
@@ -778,10 +904,13 @@ const Home: React.FC = () => {
           {/* Species detail (scroll target) */}
           <div ref={detailRef} className="scroll-mt-20">
             <section className="stagger-item space-y-6" style={stagger(2)}>
-              <h2 className="flex items-center gap-2 border-b border-journal-200 pb-2 text-journal-900">
-                <PieChart className="h-6 w-6" aria-hidden="true" />
-                Species Detail: <em className="text-journal-600">{selectedSpecies}</em>
-              </h2>
+              <div>
+                <p className="section-kicker">02 — Details</p>
+                <h2 className="mt-1 flex items-center gap-2 border-b border-journal-200 pb-2 text-journal-900">
+                  <PieChart className="h-6 w-6" aria-hidden="true" />
+                  Species Detail: <em className="text-journal-600">{selectedSpecies}</em>
+                </h2>
+              </div>
 
               {visibleDashboardError ? (
                 <ErrorBanner
@@ -842,9 +971,14 @@ const Home: React.FC = () => {
                   {/* Figures */}
                   <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     <div className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5" style={stagger(4)}>
-                      <h3 className="border-b border-journal-100 pb-2 text-base text-journal-900">
-                        Genomic Annotation Distribution
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 border-b border-journal-100 pb-2">
+                        <h3 className="mb-0 text-base text-journal-900">
+                          Genomic Annotation Distribution
+                        </h3>
+                        <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                          Doughnut
+                        </span>
+                      </div>
                       <div className="mt-3 h-72">
                         {dashboardData?.distribution?.length ? (
                           <canvas ref={annotationCanvasRef} />
@@ -865,9 +999,14 @@ const Home: React.FC = () => {
                       </p>
                     </div>
                     <div className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5" style={stagger(5)}>
-                      <h3 className="border-b border-journal-100 pb-2 text-base text-journal-900">
-                        Tissue-specific Peak Density
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 border-b border-journal-100 pb-2">
+                        <h3 className="mb-0 text-base text-journal-900">
+                          Tissue-specific Peak Density
+                        </h3>
+                        <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                          Bars
+                        </span>
+                      </div>
                       <div className="mt-3 h-72">
                         {dashboardData?.tissues?.length ? (
                           <canvas ref={tissueCanvasRef} />
@@ -891,9 +1030,14 @@ const Home: React.FC = () => {
                   {/* Row 2: types + genes + chromosomes */}
                   <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                     <div className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5 lg:col-span-4" style={stagger(6)}>
-                      <h3 className="border-b border-journal-100 pb-2 text-base text-journal-900">
-                        Peak Type Distribution
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 border-b border-journal-100 pb-2">
+                        <h3 className="mb-0 text-base text-journal-900">
+                          Peak Type Distribution
+                        </h3>
+                        <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                          Polar
+                        </span>
+                      </div>
                       <div className="mt-3 h-64">
                         {dashboardData?.typeDist?.length ? (
                           <canvas ref={typeCanvasRef} />
@@ -914,9 +1058,14 @@ const Home: React.FC = () => {
                     </div>
 
                     <div className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5 lg:col-span-4" style={stagger(7)}>
-                      <h3 className="border-b border-journal-100 pb-2 text-base text-journal-900">
-                        Top Associated Genes
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 border-b border-journal-100 pb-2">
+                        <h3 className="mb-0 text-base text-journal-900">
+                          Top Associated Genes
+                        </h3>
+                        <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                          Bars
+                        </span>
+                      </div>
                       <div className="mt-3 h-64">
                         {dashboardData?.topGenes?.length ? (
                           <canvas ref={genesCanvasRef} />
@@ -937,9 +1086,14 @@ const Home: React.FC = () => {
                     </div>
 
                     <div className="stagger-item card-elevated rounded-md border border-journal-200 bg-white p-5 lg:col-span-4" style={stagger(8)}>
-                      <h3 className="border-b border-journal-100 pb-2 text-base text-journal-900">
-                        Chromosome Distribution
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 border-b border-journal-100 pb-2">
+                        <h3 className="mb-0 text-base text-journal-900">
+                          Chromosome Distribution
+                        </h3>
+                        <span className="rounded-full border border-journal-200 px-2 py-0.5 text-[10px] uppercase tracking-wider text-journal-400">
+                          Area
+                        </span>
+                      </div>
                       <div className="mt-3 h-64">
                         {dashboardData?.chrDist?.length ? (
                           <canvas ref={chrCanvasRef} />
@@ -967,7 +1121,12 @@ const Home: React.FC = () => {
 
       {/* Module overview */}
       <section className="stagger-item space-y-4 pt-2" style={stagger(9)}>
-        <h2 className="mb-0 text-journal-900">Module Overview</h2>
+        <div>
+          <p className="section-kicker">03 — Modules</p>
+          <h2 className="mb-0 mt-1 border-b border-journal-200 pb-2 text-journal-900">
+            Module Overview
+          </h2>
+        </div>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {MODULES.map((m, i) => (
             <Link
