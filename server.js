@@ -1173,13 +1173,21 @@ const server = http.createServer(async (req, res) => {
   }
 
   // 5b. POST /api/refresh-stats — rebuild summary table after bulk import
+  //       Optional ?species=X rebuilds just one species (much faster than a full rebuild)
   if (parsedUrl.pathname === '/api/refresh-stats' && req.method === 'POST') {
     try {
-      await rebuildAllStats();
+      const targetSpecies = parsedUrl.query.species;
+      if (targetSpecies) {
+        console.log(`📊 Targeted stats rebuild for: ${targetSpecies}`);
+        await refreshSpeciesStats(targetSpecies);
+      } else {
+        await rebuildAllStats();
+      }
+      // clearCache forces /api/dashboard to re-read species_stats on next request
       clearCache();
       invalidateDataCaches();
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, message: 'Stats rebuilt and cache cleared' }));
+      res.end(JSON.stringify({ success: true, message: targetSpecies ? `Stats rebuilt for ${targetSpecies}` : 'Stats rebuilt and cache cleared' }));
     } catch (err) {
       console.error(err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1815,32 +1823,31 @@ async function prewarmCache() {
       `SELECT DISTINCT species FROM ${ACTIVE_TABLE} WHERE species IS NOT NULL AND species != ''`
     );
     const allSpecies = allSpeciesRows.map(r => r.species);
-    const [existingRows] = await promisePool.query(`SELECT species FROM species_stats`);
+    const [existingRows] = await promisePool.query(`SELECT species, type_dist, context_dist, chr_dist FROM species_stats`);
     const existingSet = new Set(existingRows.map(r => r.species));
     const missingSpecies = allSpecies.filter(s => !existingSet.has(s));
 
-    // Check if extra stat columns need populating (added after initial build)
-    let needsExtraStats = false;
-    if (existingSet.size > 0) {
-      const [sample] = await promisePool.query(`SELECT type_dist FROM species_stats LIMIT 1`);
-      if (!sample[0]?.type_dist || sample[0].type_dist === '[]' || sample[0].type_dist === null) {
-        needsExtraStats = true;
-      }
-    }
+    // Per-row staleness check: a stats row whose distributions are NULL/'[]'
+    // (e.g. an earlier refresh was interrupted) must be rebuilt — checking
+    // only LIMIT 1 previously let broken rows (e.g. wheat) slip through.
+    const isEmptyDist = (v) => !v || v === '[]';
+    const staleSpecies = existingRows
+      .filter(r =>
+        (cachedColumnNames.includes('type') && isEmptyDist(r.type_dist)) ||
+        (cachedColumnNames.includes(getDBCol('Genomic_context_of_peak')) && isEmptyDist(r.context_dist)) ||
+        (cachedColumnNames.includes('position') && isEmptyDist(r.chr_dist))
+      )
+      .map(r => r.species);
+
+    const rebuildTargets = [...missingSpecies, ...staleSpecies];
 
     if (existingSet.size === 0) {
       console.log(`   📊 Summary table empty, building stats for all ${allSpecies.length} species...`);
-    } else if (missingSpecies.length > 0 || needsExtraStats) {
-      const toBuild = needsExtraStats ? allSpecies.filter(s => existingSet.has(s)) : missingSpecies;
-      console.log(`   📊 Building stats for ${toBuild.length} species (extra stats needed: ${needsExtraStats})...`);
+    } else if (rebuildTargets.length > 0) {
+      console.log(`   📊 Rebuilding stats for ${rebuildTargets.length} species (${missingSpecies.length} missing, ${staleSpecies.length} stale): ${rebuildTargets.join(', ')}`);
     } else {
       console.log(`   ✅ All ${existingSet.size} species complete.`);
     }
-
-    // Determine which species to (re)build
-    const rebuildTargets = needsExtraStats
-      ? allSpecies.filter(s => existingSet.has(s))  // all existing species need extra stats
-      : missingSpecies;
 
     // Build species one by one (saves progress after each)
     let done = 0;
