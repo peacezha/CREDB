@@ -299,6 +299,7 @@ async function initializeDatabase() {
       console.log(`   🔎 FULLTEXT search enabled for: ${[...fulltextCols].join(', ')}`);
     } else {
       console.log(`   ℹ️ No FULLTEXT indexes found. Run npm run db:optimize to enable full-text search.`);
+      console.log(`     e.g. nohup node scripts/db_optimize.js --apply --only 3 > ft.log 2>&1 &`);
     }
 
     const missingIndexes = [];
@@ -313,6 +314,11 @@ async function initializeDatabase() {
       { name: 'idx_nearest_gene', cols: ['nearest_gene(100)'] },
       { name: 'idx_species_tissue', cols: ['species', 'tissue(100)'] },
       { name: 'idx_species_position', cols: ['species', 'position(100)'] },
+      // Speeds up gene search & suggest without FULLTEXT: `species = ? AND
+      // nearest_gene LIKE '%q%'` then only scans this species' index pages, and
+      // `species = ? AND nearest_gene LIKE 'q%'` becomes an index range scan.
+      // No USE/FORCE INDEX hints — the optimizer picks it on its own.
+      { name: 'idx_species_gene', cols: ['species', 'nearest_gene(100)'] },
     ];
 
     for (const idx of PERF_INDEXES) {
@@ -476,8 +482,11 @@ async function refreshSpeciesStats(species) {
     promisePool.query(`SELECT COUNT(*) as total FROM ${ACTIVE_TABLE} WHERE species = ?`, [species])
   );
   if (colNames.includes(tissueCol)) {
+    // No LIMIT: tissue cardinality is tiny (a few to a few dozen per species),
+    // so the full distribution stays small — and /api/filters' fast path relies
+    // on tissue_dist being complete.
     queries.push(promisePool.query(
-      `SELECT \`${tissueCol}\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`${tissueCol}\` IS NOT NULL GROUP BY \`${tissueCol}\` ORDER BY count DESC LIMIT 10`,
+      `SELECT \`${tissueCol}\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`${tissueCol}\` IS NOT NULL GROUP BY \`${tissueCol}\` ORDER BY count DESC`,
       [species]
     ));
   } else {
@@ -584,6 +593,69 @@ async function getFastCount({ species, tissue, chr, q }) {
   }
 }
 
+// --- HELPER: FAST FILTERS VIA species_stats ---
+// Builds the /api/filters response from species_stats dists (instant, avoids
+// DISTINCT + filesort over millions of rows). tissue_dist may be top-10 only
+// (older stats builds had LIMIT 10) — completeness is handled by
+// recomputeFiltersInBackground. chr_dist is built without LIMIT, so its labels
+// are already the complete chromosome list. Returns null when the species has
+// no usable stats row — caller falls back to the live DISTINCT queries.
+// Never throws: any error degrades to null.
+async function getFastFilters(species) {
+  try {
+    const [rows] = await promisePool.query(
+      `SELECT tissue_dist, chr_dist FROM species_stats WHERE species = ?`,
+      [species]
+    );
+    if (rows.length === 0) return null;
+    let tissueDist = [], chrDist = [];
+    try { tissueDist = JSON.parse(rows[0].tissue_dist || '[]'); } catch (e) {}
+    try { chrDist = JSON.parse(rows[0].chr_dist || '[]'); } catch (e) {}
+    if (!Array.isArray(tissueDist) || !Array.isArray(chrDist)) return null;
+    if (tissueDist.length === 0 && chrDist.length === 0) return null;
+    const pick = (dist) => dist.map(d => d && d.label).filter(v => typeof v === 'string' && v !== '');
+    const fullTissues = fullTissueLists.get(species);
+    return {
+      // Prefer the background-recomputed full list when available; otherwise the
+      // stats top-N, alphabetically sorted like the live DISTINCT query returns.
+      tissues: Array.isArray(fullTissues) ? fullTissues : pick(tissueDist).sort(),
+      chromosomes: pick(chrDist), // complete already; keep stats order (natural-ish)
+    };
+  } catch (e) {
+    console.log(`   ⚠️ filters fast path failed: ${e.message}`);
+    return null;
+  }
+}
+
+// --- BACKGROUND: RECOMPUTE FULL TISSUE LIST FOR /api/filters ---
+// Runs the expensive DISTINCT tissue query once per species (guarded by
+// fullTissueLists), then stores the full list in memory and patches the cached
+// filters response. Chromosomes are NOT recomputed — chr_dist has no LIMIT.
+async function recomputeFiltersInBackground(species) {
+  if (fullTissueLists.has(species)) return; // done or already in flight
+  fullTissueLists.set(species, 'pending');
+  try {
+    const tissueCol = getDBCol('tissue');
+    if (!cachedColumnNames.includes(tissueCol)) return;
+    console.log(`   🔄 Recomputing full tissue list for ${species} in background...`);
+    const t0 = Date.now();
+    const [tissueRows] = await promisePool.query(
+      `SELECT DISTINCT \`${tissueCol}\` FROM ${ACTIVE_TABLE} WHERE \`species\` = ? AND \`${tissueCol}\` IS NOT NULL AND \`${tissueCol}\` != '' ORDER BY \`${tissueCol}\``,
+      [species]
+    );
+    const tissues = tissueRows.map(r => r[tissueCol]);
+    fullTissueLists.set(species, tissues);
+    // Patch the cached filters response if it's still around
+    const cacheKey = `filters_${species}`;
+    const cachedEntry = getCached(cacheKey);
+    if (cachedEntry) setCache(cacheKey, { ...cachedEntry, tissues });
+    console.log(`   ✅ full tissue list for ${species}: ${tissues.length} tissues (${Date.now() - t0}ms)`);
+  } catch (e) {
+    fullTissueLists.delete(species); // allow retry on next request
+    console.log(`   ⚠️ background tissue recompute failed for ${species}: ${e.message}`);
+  }
+}
+
 // --- HELPER: REBUILD ALL SUMMARY STATS ---
 async function rebuildAllStats() {
   const [rows] = await promisePool.query(
@@ -684,6 +756,11 @@ function clearCache() {
 const queryCache = new Map(); // key -> { data, expires }
 const QUERY_CACHE_MAX = 500;
 
+// Full per-species tissue lists recomputed in the background for /api/filters:
+// species -> 'pending' | string[]. Doubles as the in-flight/done flag that
+// prevents concurrent duplicate recompute runs.
+const fullTissueLists = new Map();
+
 function queryCacheGet(key) {
   const entry = queryCache.get(key);
   if (!entry) return null;
@@ -702,6 +779,7 @@ function queryCachePut(key, data, ttlMs) {
 // Drop all cached query results (called after data mutations)
 function invalidateDataCaches() {
   queryCache.clear();
+  fullTissueLists.clear(); // force re-recompute of /api/filters full tissue lists
   console.log('🗑️  Query cache cleared');
 }
 
@@ -858,6 +936,20 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(cached));
       return;
+    }
+    // Fast path: build the lists from species_stats (instant). tissue_dist may be
+    // top-10 only (older stats builds) — the full tissue list is recomputed once
+    // in the background and patches this cache. chr_dist has no LIMIT, so the
+    // chromosomes from stats are already complete.
+    if (species && species !== 'All Species') {
+      const fast = await getFastFilters(species);
+      if (fast) {
+        setCache(cacheKey, fast);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(fast));
+        recomputeFiltersInBackground(species); // fire & forget — guarded, never throws
+        return;
+      }
     }
     try {
       let whereClause = "WHERE 1=1";

@@ -609,8 +609,9 @@ async function importDir(dirPath, defaultSpecies) {
 
       let tissueDist = [];
       try {
+        // 不加 LIMIT: 组织基数很小，全量分布体积可控；/api/filters 快路径依赖完整 tissue_dist
         const [rows] = await promisePool.query(
-          `SELECT tissue as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND tissue IS NOT NULL GROUP BY tissue ORDER BY count DESC LIMIT 10`,
+          `SELECT tissue as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND tissue IS NOT NULL GROUP BY tissue ORDER BY count DESC`,
           [sp]
         );
         tissueDist = rows.map(r => ({ label: r.label || 'Unknown', count: r.count }));
