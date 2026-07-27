@@ -110,14 +110,37 @@ const run = async () => {
   }
 
   // 3. type / gene / chr — each persisted right after its query
-  // chrDist groups by an expression over millions of rows. When the composite
-  // (species, position(N)) index exists, FORCE it: the position prefix covers
-  // the whole value for typical "chr:start-end" strings, so MySQL can answer
-  // with a covering index scan (no row lookups) — orders of magnitude faster
-  // than scanning the LONGTEXT table on a memory-tight box.
-  const [idxRows] = await pool.query(`SHOW INDEX FROM ${TABLE} WHERE Key_name = 'idx_species_position'`);
-  const chrFrom = idxRows.length > 0 ? `${TABLE} FORCE INDEX (idx_species_position)` : TABLE;
-  console.log(idxRows.length > 0 ? 'chrDist: using covering index idx_species_position' : 'chrDist: no position index, plain scan');
+  // NOTE: a prefix index (position(100)) can NOT be a covering index in MySQL,
+  // so grouping SUBSTRING_INDEX(position) over millions of rows means full row
+  // lookups — on this box it never finishes. Instead, chrDist uses a manual
+  // skip-scan over the ordered (species, position) index: locate the first
+  // position of each chromosome with a point query (`position > 'chrX:~'`),
+  // then COUNT each chromosome with an index-only prefix LIKE. A handful of
+  // chromosomes = a handful of fast queries instead of a full table scan.
+  const computeChrDist = async () => {
+    const dist = [];
+    let cursor = '';
+    for (let guard = 0; guard < 10000; guard++) {
+      const [rows] = await pool.query(
+        `SELECT \`position\` as p FROM ${TABLE} FORCE INDEX (idx_species_position)
+         WHERE species = ? AND \`position\` > ? AND \`position\` LIKE '%:%'
+         ORDER BY \`position\` LIMIT 1`,
+        [species, cursor]
+      );
+      if (rows.length === 0) break;
+      const chr = rows[0].p.split(':')[0];
+      const [cnt] = await pool.query(
+        `SELECT COUNT(*) as c FROM ${TABLE} WHERE species = ? AND \`position\` LIKE ?`,
+        [species, `${chr}:%`]
+      );
+      dist.push({ label: chr, count: cnt[0].c });
+      console.log(`   ${chr}: ${cnt[0].c.toLocaleString()}`);
+      cursor = `${chr}:~~`; // '~' (0x7E) sorts after any digit, so the next row belongs to the next chromosome
+    }
+    // Match the GROUP BY ordering used elsewhere: by label length then label
+    dist.sort((a, b) => a.label.length - b.label.length || (a.label < b.label ? -1 : 1));
+    return dist;
+  };
 
   const stats = [
     {
@@ -136,12 +159,20 @@ const run = async () => {
       step: 'chr',
       field: 'chr_dist',
       col: 'position',
-      sql: `SELECT SUBSTRING_INDEX(\`position\`, ':', 1) as label, COUNT(*) as count FROM ${chrFrom} WHERE species = ? AND \`position\` LIKE '%:%' GROUP BY label ORDER BY LENGTH(label), label`,
+      compute: computeChrDist,
     },
   ];
 
   for (const s of stats) {
     if (!shouldRun(s.step) || !colNames.includes(s.col)) continue;
+    if (s.compute) {
+      const t0 = Date.now();
+      const dist = await s.compute();
+      console.log(`${s.field} done (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+      await persist(s.field, JSON.stringify(dist));
+      console.log(`   ${dist.length} rows`);
+      continue;
+    }
     const [rows] = await timed(`${s.field}`, () => pool.query(s.sql, [species]));
     await persist(s.field, JSON.stringify(rows.map((r) => ({ label: r.label, count: r.count }))));
     console.log(`   ${rows.length} rows`);
