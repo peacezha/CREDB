@@ -542,16 +542,27 @@ async function refreshSpeciesStats(species) {
   const typeDist = colNames.includes('type')
     ? await runStat('typeDist', `SELECT \`type\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`type\` IS NOT NULL AND \`type\` != '' GROUP BY \`type\` ORDER BY count DESC LIMIT 15`)
     : '[]';
+  // Persist each distribution as soon as it is computed — a slow later query
+  // (chrDist) or a restart must not discard the ones already finished.
+  await promisePool.query(
+    `UPDATE species_stats SET type_dist = ?, updated_at = ? WHERE species = ?`,
+    [typeDist, Date.now(), species]
+  );
+
   const geneDist = colNames.includes('nearest_gene')
     ? await runStat('geneDist', `SELECT \`nearest_gene\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`nearest_gene\` IS NOT NULL AND \`nearest_gene\` != '' GROUP BY \`nearest_gene\` ORDER BY count DESC LIMIT 15`)
     : '[]';
+  await promisePool.query(
+    `UPDATE species_stats SET gene_dist = ?, updated_at = ? WHERE species = ?`,
+    [geneDist, Date.now(), species]
+  );
+
   const chrDist = colNames.includes('position')
     ? await runStat('chrDist', `SELECT SUBSTRING_INDEX(\`position\`, ':', 1) as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`position\` LIKE '%:%' GROUP BY label ORDER BY LENGTH(label), label`)
     : '[]';
-
   await promisePool.query(
-    `UPDATE species_stats SET type_dist = ?, gene_dist = ?, chr_dist = ?, updated_at = ? WHERE species = ?`,
-    [typeDist, geneDist, chrDist, Date.now(), species]
+    `UPDATE species_stats SET chr_dist = ?, updated_at = ? WHERE species = ?`,
+    [chrDist, Date.now(), species]
   );
 
   console.log(`      ✅ ${species} done.`);
