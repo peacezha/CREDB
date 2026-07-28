@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Chart, registerables } from 'chart.js';
 import type { BarElement, LegendItem, Plugin } from 'chart.js';
@@ -9,7 +9,9 @@ import {
   Database,
   FileText,
   Layers,
+  LayoutGrid,
   Loader2,
+  Network,
   PieChart,
   RefreshCw,
   Search,
@@ -19,6 +21,7 @@ import {
 import type { DashboardData, SpeciesOverview } from '../types';
 import { describeError, fetchDashboardData, fetchOverview, isAbortError } from '../services/api';
 import SpeciesAvatar from '../components/SpeciesAvatar';
+import SpeciesAtlasGraph from '../components/SpeciesAtlasGraph';
 import {
   CHART_COLORS,
   CHART_FONT_FAMILY,
@@ -242,6 +245,7 @@ const Home: React.FC = () => {
 
   const [speciesFilter, setSpeciesFilter] = useState('');
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [atlasView, setAtlasView] = useState<'grid' | 'tree'>('tree');
 
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
   const tissueCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -654,13 +658,24 @@ const Home: React.FC = () => {
   const heroSpecies = useCountUp(speciesList.length);
   const heroTissues = useCountUp(tissueTypeCount);
 
-  const filteredOverview = speciesFilter
-    ? speciesList.filter(o => o.species.toLowerCase().includes(speciesFilter.toLowerCase()))
-    : speciesList;
+  // Memoized so the atlas graph's simulation doesn't rebuild on unrelated renders.
+  const filteredOverview = useMemo(
+    () =>
+      speciesFilter
+        ? speciesList.filter(o => o.species.toLowerCase().includes(speciesFilter.toLowerCase()))
+        : speciesList,
+    [speciesList, speciesFilter]
+  );
 
   // Bubble size: 56–140 px scaled by relative peak count.
   const maxPeaks = speciesList.length ? Math.max(...speciesList.map(o => o.totalPeaks)) : 1;
   const getIconSize = (peaks: number) => Math.max(56, Math.min(140, 48 + (peaks / maxPeaks) * 92));
+
+  // Shared selection behavior for both atlas views: select + scroll to detail.
+  const handleSelectSpecies = (name: string) => {
+    setSelectedSpecies(name);
+    detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   if (overview === null && !overviewError) {
     return (
@@ -805,32 +820,71 @@ const Home: React.FC = () => {
                   <span className="text-sm font-normal text-journal-400">({speciesList.length} species)</span>
                 </h2>
               </div>
-              <div className="relative">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-journal-400"
-                  aria-hidden="true"
-                />
-                <input
-                  type="text"
-                  placeholder="Filter species..."
-                  aria-label="Filter species"
-                  value={speciesFilter}
-                  onChange={e => setSpeciesFilter(e.target.value)}
-                  className="w-48 rounded-md border border-journal-300 bg-paper py-2 pl-9 pr-8 text-sm text-journal-900 outline-none transition-colors focus:border-navy-600 focus:bg-white focus:ring-2 focus:ring-navy-100"
-                />
-                {speciesFilter && (
-                  <button
-                    type="button"
-                    aria-label="Clear species filter"
-                    onClick={() => setSpeciesFilter('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-journal-400 transition-colors hover:text-journal-700"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                )}
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Grid / Tree view switch */}
+                <div
+                  className="flex rounded-md border border-journal-200 bg-journal-50 p-0.5"
+                  role="group"
+                  aria-label="Atlas view"
+                >
+                  {(
+                    [
+                      { id: 'tree', label: 'Tree', icon: Network },
+                      { id: 'grid', label: 'Grid', icon: LayoutGrid },
+                    ] as const
+                  ).map(v => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      aria-pressed={atlasView === v.id}
+                      onClick={() => setAtlasView(v.id)}
+                      className={`flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-bold transition-colors ${
+                        atlasView === v.id
+                          ? 'bg-white text-navy-800 shadow-sm'
+                          : 'text-journal-500 hover:text-journal-800'
+                      }`}
+                    >
+                      <v.icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-journal-400"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Filter species..."
+                    aria-label="Filter species"
+                    value={speciesFilter}
+                    onChange={e => setSpeciesFilter(e.target.value)}
+                    className="w-48 rounded-md border border-journal-300 bg-paper py-2 pl-9 pr-8 text-sm text-journal-900 outline-none transition-colors focus:border-navy-600 focus:bg-white focus:ring-2 focus:ring-navy-100"
+                  />
+                  {speciesFilter && (
+                    <button
+                      type="button"
+                      aria-label="Clear species filter"
+                      onClick={() => setSpeciesFilter('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-journal-400 transition-colors hover:text-journal-700"
+                    >
+                      <X className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
+            {atlasView === 'tree' && filteredOverview.length > 0 ? (
+              <SpeciesAtlasGraph
+                species={filteredOverview}
+                selectedSpecies={selectedSpecies}
+                onSelect={handleSelectSpecies}
+                avatarFor={(s, size) => <SpeciesAvatar species={s} size={size} />}
+                formatCompact={formatCompact}
+              />
+            ) : (
             <div className="flex min-h-[200px] flex-wrap justify-center gap-3 md:gap-4">
               {filteredOverview.map((o, i) => {
                 const size = getIconSize(o.totalPeaks);
@@ -841,10 +895,7 @@ const Home: React.FC = () => {
                     type="button"
                     aria-label={`View details for ${o.species}`}
                     aria-pressed={isSelected}
-                    onClick={() => {
-                      setSelectedSpecies(o.species);
-                      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }}
+                    onClick={() => handleSelectSpecies(o.species)}
                     onMouseEnter={() => setActiveTooltip(o.species)}
                     onMouseLeave={() => setActiveTooltip(null)}
                     onFocus={() => setActiveTooltip(o.species)}
@@ -889,6 +940,7 @@ const Home: React.FC = () => {
                 );
               })}
             </div>
+            )}
 
             {filteredOverview.length === 0 && (
               <p className="py-10 text-center font-serif text-journal-400">
