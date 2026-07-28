@@ -8,6 +8,7 @@ import {
   Info,
   Eye,
   AlertCircle,
+  Loader2,
   Tag,
 } from 'lucide-react';
 import Modal from './Modal';
@@ -222,11 +223,27 @@ const DataGrid: React.FC<DataGridProps> = ({
   const bodyState = renderBodyState();
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-md border border-journal-200 bg-white">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-md border border-journal-200 bg-white">
       {/* Thin progress bar while reloading — old data stays visible underneath */}
       {loading && data.length > 0 && (
         <div className="h-0.5 w-full bg-navy-100" role="status" aria-label="Refreshing records">
           <div className="h-full w-full animate-pulse bg-navy-500" />
+        </div>
+      )}
+
+      {/* Loading veil over the whole grid (table + pagination) while old data is
+          still shown — blocks pointer input; z-40 sits above sticky headers
+          (th z-20 / corner th md:z-30) and the sticky footer (z-20). */}
+      {loading && data.length > 0 && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center bg-white/60 backdrop-blur-[1px]"
+          role="status"
+          aria-label="Loading data"
+        >
+          <div className="flex items-center gap-2 text-navy-700">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <span className="text-sm font-bold">Loading…</span>
+          </div>
         </div>
       )}
 
@@ -306,8 +323,9 @@ const DataGrid: React.FC<DataGridProps> = ({
             <select
               aria-label="Rows per page"
               value={limit}
+              disabled={loading}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
-              className="rounded-sm border border-journal-200 bg-white px-2 py-1 text-sm text-journal-900 outline-none focus:border-navy-600"
+              className="rounded-sm border border-journal-200 bg-white px-2 py-1 text-sm text-journal-900 outline-none focus:border-navy-600 disabled:cursor-not-allowed disabled:opacity-30"
             >
               {sizeOptions.map((size) => (
                 <option key={size} value={size}>
@@ -323,7 +341,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               type="button"
               aria-label="Previous page"
               onClick={() => onPageChange(page - 1)}
-              disabled={page <= 1}
+              disabled={loading || page <= 1}
               className="rounded-md p-2 text-journal-700 transition-colors hover:bg-journal-50 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -338,6 +356,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 min={1}
                 max={Math.max(totalPages, 1)}
                 value={pageInput}
+                disabled={loading}
                 onChange={(e) => setPageInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') commitPageInput();
@@ -348,7 +367,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     ? `Enter a page between 1 and ${Math.max(totalPages, 1)}`
                     : undefined
                 }
-                className={`w-12 rounded bg-transparent text-center text-sm font-bold text-navy-700 focus:bg-white focus:outline-none ${
+                className={`w-12 rounded bg-transparent text-center text-sm font-bold text-navy-700 focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-30 ${
                   pageInvalid ? 'ring-2 ring-red-600' : ''
                 }`}
               />
@@ -359,7 +378,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               type="button"
               aria-label="Next page"
               onClick={() => onPageChange(page + 1)}
-              disabled={page >= totalPages}
+              disabled={loading || page >= totalPages}
               className="rounded-md p-2 text-journal-700 transition-colors hover:bg-journal-50 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />

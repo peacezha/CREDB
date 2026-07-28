@@ -1,10 +1,35 @@
-import React, { useState } from 'react';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, ExternalLink, Maximize2, Minimize2 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 
 const JBrowse: React.FC = () => {
   const jbrowseUrl = 'http://yan-lab.hzau.edu.cn:3000/';
   const [iframeLoaded, setIframeLoaded] = useState(false);
+
+  // ---- Fullscreen toggle (native Fullscreen API) ------------------------------
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenSupported =
+    typeof document !== 'undefined' && Boolean(document.fullscreenEnabled);
+
+  // ESC and browser-chrome exits are synced back through this event.
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      el.requestFullscreen().catch(() => {});
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col gap-6 animate-fade-in">
@@ -41,7 +66,27 @@ const JBrowse: React.FC = () => {
         className="stagger-item card-elevated flex min-h-[400px] flex-1 flex-col p-2"
         style={{ '--i': 1 } as React.CSSProperties}
       >
-        <div className="relative min-h-[384px] flex-1 overflow-hidden rounded-sm bg-journal-50">
+        <div
+          ref={containerRef}
+          className={`relative min-h-[384px] flex-1 overflow-hidden ${
+            isFullscreen ? 'h-screen w-screen bg-white' : 'rounded-sm bg-journal-50'
+          }`}
+        >
+          {fullscreenSupported && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              className="absolute right-3 top-3 z-10 inline-flex items-center justify-center rounded-md border border-journal-200 bg-white/80 p-2 text-journal-600 backdrop-blur transition-colors hover:bg-white hover:text-navy-700"
+            >
+              {isFullscreen ? (
+                <Minimize2 className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
           {!iframeLoaded && (
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-journal-500"
