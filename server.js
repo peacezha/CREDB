@@ -177,6 +177,9 @@ let cachedColumns = [];
 let cachedColumnNames = [];
 // Columns that have a FULLTEXT index (detected at startup; created by scripts/db_optimize.js)
 let fulltextCols = new Set();
+// Whether the (species, id) composite index exists — enables FORCE INDEX on
+// species-filtered /api/peaks queries (see comment at the query site).
+let hasSpeciesIdIndex = false;
 
 // --- DATABASE CONNECTION ---
 // Credentials come from environment variables (see .env.example). DB_PASSWORD is required.
@@ -293,6 +296,7 @@ async function initializeDatabase() {
     console.log(`🔍 Checking indexes...`);
     const [existingIndices] = await connection.query(`SHOW INDEX FROM ${ACTIVE_TABLE}`);
     const existingNames = new Set(existingIndices.map(r => r.Key_name));
+    hasSpeciesIdIndex = existingNames.has('idx_species_id');
 
     // Detect FULLTEXT indexes — enables MATCH ... AGAINST search in /api/peaks & /api/suggest
     fulltextCols = new Set(
@@ -1337,12 +1341,24 @@ const server = http.createServer(async (req, res) => {
       // Use cached column list (populated at startup, refreshed after uploads)
       const dbFields = cachedColumnNames;
 
-      let query = `${selectClause} FROM ${ACTIVE_TABLE}`;
+      const hasSpeciesFilter = species && species !== 'All Species';
+      const hasSearch = q && q.trim();
+
+      // MySQL's optimizer badly misestimates `WHERE species = ? ORDER BY id`:
+      // it PK-scans expecting 15 quick matches, but a species' rows live in a
+      // contiguous high-id block (bulk-imported last), so it scans millions of
+      // rows. Force the (species, id) composite index — range-scan in id order
+      // directly inside the species' range. NEVER force it when searching:
+      // search needs the FULLTEXT / prefix indexes instead.
+      const fromClause = hasSpeciesFilter && !hasSearch && hasSpeciesIdIndex
+        ? `${ACTIVE_TABLE} FORCE INDEX (idx_species_id)`
+        : ACTIVE_TABLE;
+
+      let query = `${selectClause} FROM ${fromClause}`;
       let countQuery;
       let conditions = [];
       let params = [];
 
-      const hasSpeciesFilter = species && species !== 'All Species';
       if (hasSpeciesFilter) {
          conditions.push(`\`species\` = ?`);
          params.push(species);
@@ -1362,7 +1378,6 @@ const server = http.createServer(async (req, res) => {
          params.push(`${chr}:%`);
       }
 
-      const hasSearch = q && q.trim();
       if (hasSearch) {
         const searchTerm = q.trim();
         const orParts = [];
