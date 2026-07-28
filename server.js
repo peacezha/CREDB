@@ -625,6 +625,46 @@ async function getFastCount({ species, tissue, chr, q }) {
 
 // --- HELPER: FAST FILTERS VIA species_stats ---
 // Builds the /api/filters response from species_stats dists (instant, avoids
+// --- HELPER: FAST FILTER OPTIONS FOR "ALL SPECIES" ---
+// Unions tissue_dist / chr_dist labels across every species_stats row (instant).
+// Used when /api/filters is called without a species — avoids a table-wide
+// DISTINCT over the 20GB main table. tissue_dist may be top-10-only on older
+// builds, so this is best-effort complete; never throws (null on any error).
+async function getFastFiltersAll() {
+  try {
+    const [rows] = await promisePool.query(`SELECT tissue_dist, chr_dist FROM species_stats`);
+    if (!rows.length) return null;
+    const tissues = new Set();
+    const chrs = new Set();
+    let any = false;
+    for (const row of rows) {
+      for (const [field, set] of [
+        ['tissue_dist', tissues],
+        ['chr_dist', chrs],
+      ]) {
+        if (!row[field]) continue;
+        try {
+          const arr = JSON.parse(row[field]);
+          if (Array.isArray(arr) && arr.length > 0) {
+            any = true;
+            arr.forEach((x) => x && x.label && set.add(x.label));
+          }
+        } catch (e) {
+          /* skip malformed JSON */
+        }
+      }
+    }
+    if (!any) return null;
+    return {
+      tissues: [...tissues].sort(),
+      chromosomes: [...chrs].sort((a, b) => a.length - b.length || (a < b ? -1 : 1)),
+    };
+  } catch (e) {
+    console.error('getFastFiltersAll failed:', e.message);
+    return null;
+  }
+}
+
 // DISTINCT + filesort over millions of rows). tissue_dist may be top-10 only
 // (older stats builds had LIMIT 10) — completeness is handled by
 // recomputeFiltersInBackground. chr_dist is built without LIMIT, so its labels
@@ -966,6 +1006,18 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(cached));
       return;
+    }
+    // Fast path (no species = "All Species"): union the labels from every row of
+    // species_stats (instant). NEVER run a table-wide DISTINCT here — on the 20GB
+    // table those queries pile up for hours and starve the whole service.
+    if (!species || species === 'All Species') {
+      const fastAll = await getFastFiltersAll();
+      if (fastAll) {
+        setCache(cacheKey, fastAll);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(fastAll));
+        return;
+      }
     }
     // Fast path: build the lists from species_stats (instant). tissue_dist may be
     // top-10 only (older stats builds) — the full tissue list is recomputed once
