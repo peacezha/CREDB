@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Home from './pages/Home';
@@ -17,27 +17,50 @@ const PageLoader: React.FC = () => (
   </div>
 );
 
+const AppShell: React.FC = () => {
+  const { pathname } = useLocation();
+  // JBrowse gets a full-bleed layout: no container width cap, no page padding,
+  // no footer — the genome browser fills the whole viewport below the navbar.
+  const fullBleed = pathname === '/jbrowse';
+
+  return (
+    <div
+      className={
+        fullBleed
+          ? 'flex h-screen flex-col overflow-hidden bg-paper text-neutral-900'
+          : 'flex min-h-screen flex-col bg-paper text-neutral-900'
+      }
+    >
+      <Navbar />
+      <main
+        className={
+          fullBleed
+            ? 'flex w-full min-h-0 flex-1 flex-col'
+            : 'mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 py-6 sm:px-6 lg:px-10'
+        }
+      >
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/data" element={<DataViewer />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="/jbrowse" element={<JBrowse />} />
+            <Route path="/download" element={<Download />} />
+            <Route path="/submit" element={<Submit />} />
+            <Route path="/help" element={<Help />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </main>
+      {!fullBleed && <Footer />}
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   return (
     <HashRouter>
-      <div className="flex min-h-screen flex-col bg-paper text-neutral-900">
-        <Navbar />
-        <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 py-6 sm:px-6 lg:px-10">
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/data" element={<DataViewer />} />
-              <Route path="/analysis" element={<Analysis />} />
-              <Route path="/jbrowse" element={<JBrowse />} />
-              <Route path="/download" element={<Download />} />
-              <Route path="/submit" element={<Submit />} />
-              <Route path="/help" element={<Help />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-        <Footer />
-      </div>
+      <AppShell />
     </HashRouter>
   );
 };
