@@ -1389,7 +1389,13 @@ const server = http.createServer(async (req, res) => {
           : null;
 
         if (ftQuery) {
-          orParts.push('(MATCH(`peak_id`) AGAINST (? IN BOOLEAN MODE) OR MATCH(`nearest_gene`) AGAINST (? IN BOOLEAN MODE))');
+          // `MATCH(a) OR MATCH(b)` defeats both fulltext indexes (MySQL falls
+          // back to evaluating MATCH row-by-row over millions of rows — search
+          // COUNTs took 25-106s). UNION instead: each branch uses its own FT
+          // index and the outer query only touches the small matched id set.
+          conditions.push(
+            `id IN ((SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`peak_id\`) AGAINST (? IN BOOLEAN MODE)) UNION (SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`nearest_gene\`) AGAINST (? IN BOOLEAN MODE)))`
+          );
           params.push(ftQuery, ftQuery);
         } else if (/^[A-Za-z0-9_.:\-]+$/.test(searchTerm)) {
           // ID-style query (peak_id / gene id / positional string, single term):

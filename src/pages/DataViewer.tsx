@@ -428,10 +428,24 @@ const DataViewer: React.FC = () => {
     );
   }, [data, extraColumns]);
 
-  // Species changes reset the dependent filters in the same atomic URL
-  // update, so exactly one data request is fired afterwards.
+  // Species changes reset every dependent filter — tissue, chr, page and the
+  // search term (both the URL param and the local box state) — in one atomic
+  // URL update, so exactly one data request is fired afterwards. This only
+  // runs for user-initiated dropdown changes; back/forward navigation simply
+  // restores whatever the URL carries. limit is preserved.
   const handleSpeciesChange = (value: string) => {
-    updateParams({ species: value === ALL_SPECIES ? null : value, tissue: null, chr: null, page: null });
+    lastWrittenQuery.current = '';
+    setSearchInput('');
+    setSuggestions(null);
+    setSuggestionsOpen(false);
+    setActiveIndex(-1);
+    updateParams({
+      species: value === ALL_SPECIES ? null : value,
+      tissue: null,
+      chr: null,
+      q: null,
+      page: null,
+    });
   };
   const handleTissueChange = (value: string) => {
     updateParams({ tissue: value === ALL_TISSUES ? null : value, page: null });
@@ -486,6 +500,20 @@ const DataViewer: React.FC = () => {
       setSuggestionsOpen(false);
       setActiveIndex(-1);
     }
+  };
+
+  // Clicking the Search button runs the typed query immediately — the same
+  // behavior as pressing Enter with no suggestion highlighted: write q to the
+  // URL, reset to page 1, and close the dropdown (suppressing a reopen for
+  // the same text). No waiting for the 400 ms debounce.
+  const handleSearchSubmit = () => {
+    const q = searchInput.trim();
+    suppressSuggestFor.current = q;
+    setSuggestionsOpen(false);
+    setActiveIndex(-1);
+    if (q === qParam) return; // nothing new to search
+    lastWrittenQuery.current = q;
+    updateParams({ q: q || null, page: null });
   };
 
   const renderSuggestionOption = (value: string, index: number) => (
@@ -589,83 +617,100 @@ const DataViewer: React.FC = () => {
           </p>
         )}
 
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-journal-400"
-            aria-hidden="true"
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            role="combobox"
-            aria-expanded={suggestionsOpen && flatOptions.length > 0}
-            aria-controls="search-suggestions"
-            aria-activedescendant={activeIndex >= 0 ? `search-opt-${activeIndex}` : undefined}
-            aria-autocomplete="list"
-            placeholder="Search Peak ID, gene, position (e.g. chr1:1000-2000)…"
-            aria-label="Search records"
-            value={searchInput}
-            onChange={e => {
-              suppressSuggestFor.current = null;
-              setSearchInput(e.target.value);
-            }}
-            onKeyDown={handleSearchKeyDown}
-            onFocus={() => {
-              if (blurTimer.current) {
-                clearTimeout(blurTimer.current);
-                blurTimer.current = null;
-              }
-              if (flatOptions.length > 0) setSuggestionsOpen(true);
-            }}
-            onBlur={() => {
-              // Delay closing so a click on a suggestion registers first.
-              blurTimer.current = setTimeout(() => setSuggestionsOpen(false), 150);
-            }}
-            className="block w-full rounded-md border border-journal-300 bg-white py-2.5 pl-10 pr-16 text-sm text-journal-900 shadow-sm outline-none transition-colors focus:border-navy-600 focus:ring-2 focus:ring-navy-100"
-          />
-          <div className="absolute inset-y-0 right-3 flex items-center gap-2">
-            {debouncing && (
-              <Loader2 className="h-4 w-4 animate-spin text-journal-400" aria-label="Search pending" />
-            )}
-            {searchInput && (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => setSearchInput('')}
-                className="text-journal-400 transition-colors hover:text-journal-700"
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-journal-400"
+              aria-hidden="true"
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              role="combobox"
+              aria-expanded={suggestionsOpen && flatOptions.length > 0}
+              aria-controls="search-suggestions"
+              aria-activedescendant={activeIndex >= 0 ? `search-opt-${activeIndex}` : undefined}
+              aria-autocomplete="list"
+              placeholder="Search Peak ID, gene, position (e.g. chr1:1000-2000)…"
+              aria-label="Search records"
+              value={searchInput}
+              onChange={e => {
+                suppressSuggestFor.current = null;
+                setSearchInput(e.target.value);
+              }}
+              onKeyDown={handleSearchKeyDown}
+              onFocus={() => {
+                if (blurTimer.current) {
+                  clearTimeout(blurTimer.current);
+                  blurTimer.current = null;
+                }
+                if (flatOptions.length > 0) setSuggestionsOpen(true);
+              }}
+              onBlur={() => {
+                // Delay closing so a click on a suggestion registers first.
+                blurTimer.current = setTimeout(() => setSuggestionsOpen(false), 150);
+              }}
+              className="block w-full rounded-md border border-journal-300 bg-white py-2.5 pl-10 pr-16 text-sm text-journal-900 shadow-sm outline-none transition-colors focus:border-navy-600 focus:ring-2 focus:ring-navy-100"
+            />
+            <div className="absolute inset-y-0 right-3 flex items-center gap-2">
+              {debouncing && (
+                <Loader2 className="h-4 w-4 animate-spin text-journal-400" aria-label="Search pending" />
+              )}
+              {searchInput && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setSearchInput('')}
+                  className="text-journal-400 transition-colors hover:text-journal-700"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            {suggestionsOpen && suggestions && flatOptions.length > 0 && (
+              <div
+                id="search-suggestions"
+                role="listbox"
+                aria-label="Search suggestions"
+                className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-journal-200 bg-white shadow-lg"
               >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
+                {suggestions.peakIds.length > 0 && (
+                  <div className="py-1">
+                    <p className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-journal-400">
+                      Peak IDs
+                    </p>
+                    {suggestions.peakIds.map((v, i) => renderSuggestionOption(v, i))}
+                  </div>
+                )}
+                {suggestions.genes.length > 0 && (
+                  <div className="border-t border-journal-100 py-1">
+                    <p className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-journal-400">
+                      Genes
+                    </p>
+                    {suggestions.genes.map((v, j) =>
+                      renderSuggestionOption(v, suggestions.peakIds.length + j)
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          {suggestionsOpen && suggestions && flatOptions.length > 0 && (
-            <div
-              id="search-suggestions"
-              role="listbox"
-              aria-label="Search suggestions"
-              className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-journal-200 bg-white shadow-lg"
-            >
-              {suggestions.peakIds.length > 0 && (
-                <div className="py-1">
-                  <p className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-journal-400">
-                    Peak IDs
-                  </p>
-                  {suggestions.peakIds.map((v, i) => renderSuggestionOption(v, i))}
-                </div>
-              )}
-              {suggestions.genes.length > 0 && (
-                <div className="border-t border-journal-100 py-1">
-                  <p className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-journal-400">
-                    Genes
-                  </p>
-                  {suggestions.genes.map((v, j) =>
-                    renderSuggestionOption(v, suggestions.peakIds.length + j)
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Immediate search — same as pressing Enter, skips the 400 ms debounce. */}
+          <button
+            type="button"
+            onClick={handleSearchSubmit}
+            disabled={loading}
+            className="btn-primary inline-flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:transform-none"
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Search className="h-4 w-4" aria-hidden="true" />
+            )}
+            Search
+          </button>
         </div>
         <p className="text-xs text-journal-500">
           Tip: separate multiple terms with a space to narrow the search.
