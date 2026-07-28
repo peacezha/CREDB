@@ -217,10 +217,10 @@ const DataViewer: React.FC = () => {
   // Stats for the currently displayed result set: server query time, or "cached".
   const [queryStats, setQueryStats] = useState<{ tookMs?: number; cached: boolean } | null>(null);
 
-  // The search box is local state; its 400 ms-debounced value is written to the URL.
+  // The search box is local state. It is written to the URL only by an
+  // explicit search action (Search button, Enter, or picking a suggestion) —
+  // typing alone never triggers a query.
   const [searchInput, setSearchInput] = useState(qParam);
-  const debouncedSearch = useDebounce(searchInput, 400);
-  const debouncing = searchInput !== debouncedSearch;
 
   // ---- Autocomplete -----------------------------------------------------------
   const inputRef = useRef<HTMLInputElement>(null);
@@ -228,7 +228,7 @@ const DataViewer: React.FC = () => {
   const [suggestions, setSuggestions] = useState<{ peakIds: string[]; genes: string[] } | null>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  // The 200 ms suggestion debounce runs ahead of the 400 ms search debounce.
+  // Autocomplete still debounces keystrokes (200 ms) before fetching.
   const debouncedSuggest = useDebounce(searchInput, 200);
   // Selecting a suggestion (or pressing ESC) must not immediately reopen the
   // dropdown for the same text — remember what to suppress until the user types.
@@ -269,14 +269,6 @@ const DataViewer: React.FC = () => {
     lastWrittenQuery.current = qParam;
     setSearchInput(qParam);
   }, [qParam]);
-  useEffect(() => {
-    if (debouncedSearch === qParam) return;
-    lastWrittenQuery.current = debouncedSearch;
-    updateParams({ q: debouncedSearch || null, page: null });
-    // qParam is intentionally read but not a dependency: reacting to it would
-    // write the URL right back after external navigation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, updateParams]);
 
   // Filter option lists
   const [speciesList, setSpeciesList] = useState<string[]>([]);
@@ -650,17 +642,21 @@ const DataViewer: React.FC = () => {
                 // Delay closing so a click on a suggestion registers first.
                 blurTimer.current = setTimeout(() => setSuggestionsOpen(false), 150);
               }}
-              className="block w-full rounded-md border border-journal-300 bg-white py-2.5 pl-10 pr-16 text-sm text-journal-900 shadow-sm outline-none transition-colors focus:border-navy-600 focus:ring-2 focus:ring-navy-100"
+              className="block w-full rounded-md border border-journal-300 bg-white py-2.5 pl-10 pr-10 text-sm text-journal-900 shadow-sm outline-none transition-colors focus:border-navy-600 focus:ring-2 focus:ring-navy-100"
             />
             <div className="absolute inset-y-0 right-3 flex items-center gap-2">
-              {debouncing && (
-                <Loader2 className="h-4 w-4 animate-spin text-journal-400" aria-label="Search pending" />
-              )}
               {searchInput && (
                 <button
                   type="button"
                   aria-label="Clear search"
-                  onClick={() => setSearchInput('')}
+                  onClick={() => {
+                    setSearchInput('');
+                    // An active query in the URL is cleared immediately too.
+                    if (qParam) {
+                      lastWrittenQuery.current = '';
+                      updateParams({ q: null, page: null });
+                    }
+                  }}
                   className="text-journal-400 transition-colors hover:text-journal-700"
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
@@ -713,7 +709,8 @@ const DataViewer: React.FC = () => {
           </button>
         </div>
         <p className="text-xs text-journal-500">
-          Tip: separate multiple terms with a space to narrow the search.
+          Press Search or Enter to search. Tip: separate multiple terms with a space to narrow
+          the search.
         </p>
       </div>
 
