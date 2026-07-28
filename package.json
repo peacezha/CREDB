@@ -13,7 +13,8 @@
     "import": "node bulk_import.js",
     "import-all": "node bulk_import.js --dir",
     "db:audit": "node scripts/db_audit.js",
-    "db:optimize": "node scripts/db_optimize.js"
+    "db:optimize": "node scripts/db_optimize.js",
+    "db:backfill-tissue-chr": "node scripts/backfill_tissue_chr.js"
   },
   "dependencies": {
     "chart.js": "^4.4.7",

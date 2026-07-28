@@ -281,6 +281,11 @@ async function initializeDatabase() {
     try {
       await connection.query(`ALTER TABLE species_stats ADD COLUMN \`tissue_complete\` TINYINT DEFAULT 0`);
     } catch (e) { /* already exists */ }
+    // tissue_chr_dist: per-chromosome tissue counts — powers the 3-dimension
+    // fast COUNT (species+tissue+chr) in /api/peaks.
+    try {
+      await connection.query(`ALTER TABLE species_stats ADD COLUMN \`tissue_chr_dist\` LONGTEXT`);
+    } catch (e) { /* already exists */ }
 
     // 4. LOAD PERSISTENT CACHE FROM DISK
     loadCacheFromDisk();
@@ -591,12 +596,45 @@ async function refreshSpeciesStats(species) {
     [chrDist, Date.now(), species]
   );
 
+  // tissue_chr_dist: per-chromosome tissue breakdown ({chr: {tissue: count}}),
+  // enabling the 3-dimension fast COUNT (species+tissue+chr) in getFastCount.
+  // One GROUP BY per chromosome — each is an index range scan on
+  // idx_species_position, never a table-wide scan. Chromosomes with no rows
+  // are omitted from the map.
+  if (colNames.includes('position') && colNames.includes('tissue')) {
+    const tc0 = Date.now();
+    const tissueChrDist = {};
+    try {
+      let chrLabels = [];
+      try { chrLabels = JSON.parse(chrDist || '[]').map(d => d && d.label).filter(Boolean); } catch (e) {}
+      for (const chrLabel of chrLabels) {
+        const [tcRows] = await promisePool.query(
+          `SELECT \`tissue\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE species = ? AND \`tissue\` IS NOT NULL AND \`position\` LIKE ? GROUP BY \`tissue\``,
+          [species, `${chrLabel}:%`]
+        );
+        if (tcRows.length > 0) {
+          tissueChrDist[chrLabel] = {};
+          for (const r of tcRows) tissueChrDist[chrLabel][r.label || 'Unknown'] = r.count;
+        }
+      }
+    } catch (e) {
+      console.log(`      ⚠️ tissue_chr: ${e.message}`);
+    }
+    await promisePool.query(
+      `UPDATE species_stats SET tissue_chr_dist = ?, updated_at = ? WHERE species = ?`,
+      [JSON.stringify(tissueChrDist), Date.now(), species]
+    );
+    console.log(`      tissue_chr: ${Object.keys(tissueChrDist).length} chrs (${Date.now() - tc0}ms)`);
+  }
+
   console.log(`      ✅ ${species} done.`);
 }
 
 // --- HELPER: FAST COUNT VIA species_stats ---
 // Avoids a full COUNT(*) on the 20GB main table for the common single-dimension
-// filter combos by reading pre-aggregated numbers from species_stats.
+// filter combos (species / species+tissue / species+chr) and the 3-dimension
+// combo (species+tissue+chr, via tissue_chr_dist {chr: {tissue: count}}) by
+// reading pre-aggregated numbers from species_stats.
 // tissue_dist / chr_dist are JSON arrays of { label, count } — labels are raw
 // tissue values and SUBSTRING_INDEX(position, ':', 1) respectively, exactly the
 // values /api/filters returns (tissue_dist is top-10 only: a missing label
@@ -609,7 +647,23 @@ async function getFastCount({ species, tissue, chr, q }) {
     if (!hasSpecies) return null;
     const hasTissue = tissue && tissue !== 'All Tissues';
     const hasChr = chr && chr !== 'All Chromosomes';
-    if (hasTissue && hasChr) return null;              // multi-dimension: not covered
+
+    // 3-dimension combo (species+tissue+chr): tissue×chr cross distribution,
+    // one PK lookup. Missing chr/tissue key or missing column → real COUNT.
+    if (hasTissue && hasChr) {
+      const [rows3] = await promisePool.query(
+        `SELECT tissue_chr_dist FROM species_stats WHERE species = ?`,
+        [species]
+      );
+      if (rows3.length === 0 || !rows3[0].tissue_chr_dist) return null;
+      let cross;
+      try { cross = JSON.parse(rows3[0].tissue_chr_dist); } catch (e) { return null; }
+      if (!cross || typeof cross !== 'object' || Array.isArray(cross)) return null;
+      const byChr = cross[chr];
+      if (!byChr || typeof byChr !== 'object' || Array.isArray(byChr)) return null;
+      const n = byChr[tissue];
+      return (typeof n === 'number' && n >= 0) ? n : null;
+    }
 
     const [rows] = await promisePool.query(
       `SELECT total_peaks, tissue_dist, chr_dist FROM species_stats WHERE species = ?`,
