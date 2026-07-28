@@ -1393,8 +1393,10 @@ const server = http.createServer(async (req, res) => {
           // back to evaluating MATCH row-by-row over millions of rows — search
           // COUNTs took 25-106s). UNION instead: each branch uses its own FT
           // index and the outer query only touches the small matched id set.
+          // The UNION must be wrapped in a derived table — MySQL (esp. 5.7)
+          // rejects `IN ((SELECT ...) UNION (SELECT ...))` directly.
           conditions.push(
-            `id IN ((SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`peak_id\`) AGAINST (? IN BOOLEAN MODE)) UNION (SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`nearest_gene\`) AGAINST (? IN BOOLEAN MODE)))`
+            `id IN (SELECT id FROM ((SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`peak_id\`) AGAINST (? IN BOOLEAN MODE)) UNION (SELECT id FROM ${ACTIVE_TABLE} WHERE MATCH(\`nearest_gene\`) AGAINST (? IN BOOLEAN MODE))) AS ft_ids)`
           );
           params.push(ftQuery, ftQuery);
         } else if (/^[A-Za-z0-9_.:\-]+$/.test(searchTerm)) {
