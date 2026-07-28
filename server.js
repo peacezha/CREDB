@@ -273,6 +273,11 @@ async function initializeDatabase() {
         await connection.query(`ALTER TABLE species_stats ADD COLUMN \`${col}\` LONGTEXT`);
       } catch (e) { /* already exists */ }
     }
+    // tissue_complete: 1 once the FULL tissue list (not the old top-10) has been
+    // computed for that species — prevents background recompute storms at boot.
+    try {
+      await connection.query(`ALTER TABLE species_stats ADD COLUMN \`tissue_complete\` TINYINT DEFAULT 0`);
+    } catch (e) { /* already exists */ }
 
     // 4. LOAD PERSISTENT CACHE FROM DISK
     loadCacheFromDisk();
@@ -517,11 +522,12 @@ async function refreshSpeciesStats(species) {
   const tissueDist = tissueRows.map(r => ({ label: r.label || 'Unknown', count: r.count }));
   console.log(`      ${totalPeaks.toLocaleString()} peaks, ${tissueDist.length} tissues`);
 
-  // Save fast stats immediately, then do slow context query
+  // Save fast stats immediately, then do slow context query.
+  // tissue_complete=1: the tissue list written here is complete (no LIMIT).
   await promisePool.query(
-    `INSERT INTO species_stats (species, total_peaks, tissue_dist, context_dist, updated_at)
-     VALUES (?, ?, ?, '[]', ?)
-     ON DUPLICATE KEY UPDATE total_peaks = VALUES(total_peaks), tissue_dist = VALUES(tissue_dist), updated_at = VALUES(updated_at)`,
+    `INSERT INTO species_stats (species, total_peaks, tissue_dist, context_dist, updated_at, tissue_complete)
+     VALUES (?, ?, ?, '[]', ?, 1)
+     ON DUPLICATE KEY UPDATE total_peaks = VALUES(total_peaks), tissue_dist = VALUES(tissue_dist), updated_at = VALUES(updated_at), tissue_complete = 1`,
     [species, totalPeaks, JSON.stringify(tissueDist), Date.now()]
   );
 
@@ -698,23 +704,53 @@ async function getFastFilters(species) {
 }
 
 // --- BACKGROUND: RECOMPUTE FULL TISSUE LIST FOR /api/filters ---
-// Runs the expensive DISTINCT tissue query once per species (guarded by
-// fullTissueLists), then stores the full list in memory and patches the cached
-// filters response. Chromosomes are NOT recomputed — chr_dist has no LIMIT.
+// Runs the expensive DISTINCT tissue query once per species EVER (persisted to
+// species_stats.tissue_dist + tissue_complete=1), then stores the full list in
+// memory and patches the cached filters response. Species whose stats were
+// built by current code are already complete and never trigger a recompute —
+// this prevents per-boot recompute storms on the 20GB table.
+// Chromosomes are NOT recomputed — chr_dist has no LIMIT.
 async function recomputeFiltersInBackground(species) {
   if (fullTissueLists.has(species)) return; // done or already in flight
   fullTissueLists.set(species, 'pending');
   try {
     const tissueCol = getDBCol('tissue');
     if (!cachedColumnNames.includes(tissueCol)) return;
+
+    // Skip when the persisted tissue list is already complete (permanent flag).
+    try {
+      const [flagRows] = await promisePool.query(
+        `SELECT tissue_complete FROM species_stats WHERE species = ?`,
+        [species]
+      );
+      if (flagRows.length > 0 && flagRows[0].tissue_complete === 1) {
+        fullTissueLists.set(species, 'done');
+        return;
+      }
+    } catch (e) { /* flag column missing on very old schemas — fall through */ }
+
     console.log(`   🔄 Recomputing full tissue list for ${species} in background...`);
     const t0 = Date.now();
+    // GROUP BY (with counts) costs the same as DISTINCT here, and the counts
+    // keep species_stats.tissue_dist valid for dashboards and fast COUNT.
     const [tissueRows] = await promisePool.query(
-      `SELECT DISTINCT \`${tissueCol}\` FROM ${ACTIVE_TABLE} WHERE \`species\` = ? AND \`${tissueCol}\` IS NOT NULL AND \`${tissueCol}\` != '' ORDER BY \`${tissueCol}\``,
+      `SELECT \`${tissueCol}\` as label, COUNT(*) as count FROM ${ACTIVE_TABLE} WHERE \`species\` = ? AND \`${tissueCol}\` IS NOT NULL AND \`${tissueCol}\` != '' GROUP BY \`${tissueCol}\` ORDER BY count DESC`,
       [species]
     );
-    const tissues = tissueRows.map(r => r[tissueCol]);
+    const tissueDist = tissueRows.map(r => ({ label: r.label || 'Unknown', count: r.count }));
+    const tissues = tissueDist.map(r => r.label).sort();
     fullTissueLists.set(species, tissues);
+
+    // Persist permanently: future boots skip the recompute entirely.
+    try {
+      await promisePool.query(
+        `UPDATE species_stats SET tissue_dist = ?, tissue_complete = 1 WHERE species = ?`,
+        [JSON.stringify(tissueDist), species]
+      );
+    } catch (e) {
+      console.log(`   ⚠️ could not persist full tissue list for ${species}: ${e.message}`);
+    }
+
     // Patch the cached filters response if it's still around
     const cacheKey = `filters_${species}`;
     const cachedEntry = getCached(cacheKey);
